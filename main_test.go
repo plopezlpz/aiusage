@@ -18,6 +18,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+func setTestCacheHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("XDG_CACHE_HOME", dir)
+	t.Setenv("LOCALAPPDATA", dir)
+}
+
 func TestParseCommandRejectsUnknownAndTrailingArguments(t *testing.T) {
 	valid := [][]string{
 		nil, {"--demo"}, {"--claude-oauth"}, {"ingest-claude-code"}, {"collect-claude"}, {"collect-codex"}, {"collect-kimi"},
@@ -176,7 +182,7 @@ func TestParseStatusLineEnforcesInputLimitAndSingleValue(t *testing.T) {
 func TestIngestPreservesQuotasWhenRateLimitsAreMissing(t *testing.T) {
 	temp := t.TempDir()
 	t.Setenv("HOME", temp)
-	t.Setenv("XDG_CACHE_HOME", temp)
+	setTestCacheHome(t, temp)
 	path, err := cachePath()
 	if err != nil {
 		t.Fatal(err)
@@ -211,7 +217,7 @@ func TestIngestPreservesQuotasWhenRateLimitsAreMissing(t *testing.T) {
 
 func TestObsoleteStatusLineIngestDoesNotRegressNewerCache(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setTestCacheHome(t, t.TempDir())
 	newer := time.Now().Add(time.Minute)
 	path, err := cachePath()
 	if err != nil {
@@ -237,7 +243,7 @@ func TestObsoleteStatusLineIngestDoesNotRegressNewerCache(t *testing.T) {
 func TestStatusLineIngestPreservesCollectedFableQuota(t *testing.T) {
 	temp := t.TempDir()
 	t.Setenv("HOME", temp)
-	t.Setenv("XDG_CACHE_HOME", temp)
+	setTestCacheHome(t, temp)
 	now := time.Now()
 	reset := now.Add(3 * 24 * time.Hour)
 	previous := cacheFile{
@@ -284,7 +290,7 @@ func TestStatusLineIngestPreservesCollectedFableQuota(t *testing.T) {
 
 func TestStatusLineIngestMigratesLegacyOAuthFailure(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setTestCacheHome(t, t.TempDir())
 	now := time.Now()
 	reset := now.Add(3 * 24 * time.Hour)
 	path, _ := cachePath()
@@ -342,7 +348,7 @@ func TestValidateCacheRejectsUntrustedValues(t *testing.T) {
 
 func TestProviderCacheReadsRejectOversizedFiles(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setTestCacheHome(t, t.TempDir())
 	readers := []struct {
 		path func() (string, error)
 		read func() error
@@ -624,7 +630,7 @@ func TestResetRefreshStartsOnlyDueProviderAndIgnoresDuplicate(t *testing.T) {
 
 func TestResetRefreshWaitsForInFlightProviderThenRunsOnce(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setTestCacheHome(t, t.TempDir())
 	now := time.Now()
 	reset := now.Add(-resetRefreshDelay)
 	deadline := reset.Add(resetRefreshDelay)
@@ -672,7 +678,7 @@ func TestResetRefreshBootstrapAndMissedDeadline(t *testing.T) {
 
 func TestDefaultDashboardSchedulesAllProvidersAndRForcesThem(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setTestCacheHome(t, t.TempDir())
 	dashboard := newDashboardModel()
 	if !dashboard.claudeCollecting || !dashboard.codexCollecting || !dashboard.kimiCollecting || dashboard.Init() == nil {
 		t.Fatalf("default startup state = %#v", dashboard)
@@ -691,7 +697,7 @@ func TestDefaultDashboardSchedulesAllProvidersAndRForcesThem(t *testing.T) {
 
 func TestStartupUsesFreshProviderCachesAndManualRefreshBypassesThem(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setTestCacheHome(t, t.TempDir())
 	now := time.Now()
 	reset := now.Add(time.Hour)
 
@@ -757,7 +763,7 @@ func TestStartupUsesFreshProviderCachesAndManualRefreshBypassesThem(t *testing.T
 func TestTickReloadsPushedCacheAndReschedules(t *testing.T) {
 	temp := t.TempDir()
 	t.Setenv("HOME", temp)
-	t.Setenv("XDG_CACHE_HOME", temp)
+	setTestCacheHome(t, temp)
 	path, err := cachePath()
 	if err != nil {
 		t.Fatal(err)
@@ -828,7 +834,7 @@ func TestCacheJSONRecordsAttemptState(t *testing.T) {
 func writeSnapshotCaches(t *testing.T, now, reset time.Time) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", os.Getenv("HOME"))
+	setTestCacheHome(t, os.Getenv("HOME"))
 	attemptedAt := now.Add(-time.Minute)
 	updatedAt := now.Add(-2 * time.Minute)
 	claudePath, _ := cachePath()
@@ -995,7 +1001,7 @@ func writeDashboardCaches(t *testing.T) (string, string) {
 	t.Helper()
 	temp := t.TempDir()
 	t.Setenv("HOME", temp)
-	t.Setenv("XDG_CACHE_HOME", temp)
+	setTestCacheHome(t, temp)
 	now := time.Now()
 	reset := now.Add(2 * time.Hour)
 	claudePath, err := cachePath()
@@ -1104,7 +1110,7 @@ func TestProviderRefreshErrorSurvivesOtherCompletionAndClearsOnOwnSuccess(t *tes
 func TestLoadingRefreshingAndCompactIssueRendering(t *testing.T) {
 	temp := t.TempDir()
 	t.Setenv("HOME", temp)
-	t.Setenv("XDG_CACHE_HOME", temp)
+	setTestCacheHome(t, temp)
 	loading := model{width: 80, height: 24, claudeCollecting: true, codexCollecting: true, kimiCollecting: true}
 	loading.reload()
 	if view := loading.View(); !strings.Contains(view, "Loading usage data") || strings.Contains(view, "open Claude Code") {

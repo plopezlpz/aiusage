@@ -342,6 +342,9 @@ func TestKimiServerHelper(t *testing.T) {
 }
 
 func TestKimiTokenRequiresPrivateRegularFile(t *testing.T) {
+	if !kimiProcessGroupsSupported() {
+		t.Skip("Unix token-file permissions test")
+	}
 	if token, err := readKimiToken(writeTestKimiToken(t, "safe-token\n", 0o600)); err != nil || token != "safe-token" {
 		t.Fatalf("private token = %q, %v", token, err)
 	}
@@ -368,7 +371,7 @@ func TestKimiFailurePreservesPrivateProviderCache(t *testing.T) {
 	}
 	temp := t.TempDir()
 	t.Setenv("HOME", temp)
-	t.Setenv("XDG_CACHE_HOME", temp)
+	setTestCacheHome(t, temp)
 	t.Setenv("KIMI_CODE_HOME", temp+"/kimi-home")
 	if err := os.MkdirAll(temp+"/kimi-home", 0o700); err != nil {
 		t.Fatal(err)
@@ -407,7 +410,7 @@ func TestCanceledKimiCollectionDoesNotMutateCache(t *testing.T) {
 		t.Skip("Unix process-group integration test")
 	}
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setTestCacheHome(t, t.TempDir())
 	now := time.Now()
 	path, _ := kimiCachePath()
 	previous := kimiCacheFile{
@@ -448,7 +451,7 @@ func TestObsoleteKimiFailureCannotRegressNewerCache(t *testing.T) {
 		t.Skip("Unix process-group integration test")
 	}
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setTestCacheHome(t, t.TempDir())
 	t.Setenv("KIMI_CODE_HOME", t.TempDir())
 	now := time.Now()
 	newer := now.Add(time.Minute)
@@ -468,7 +471,7 @@ func TestObsoleteKimiFailureCannotRegressNewerCache(t *testing.T) {
 func TestTUIRendersKimiCacheAndSchedulesRefresh(t *testing.T) {
 	temp := t.TempDir()
 	t.Setenv("HOME", temp)
-	t.Setenv("XDG_CACHE_HOME", temp)
+	setTestCacheHome(t, temp)
 	now := time.Now()
 	cache := kimiCacheFile{
 		Version: cacheVersion, Provider: "Kimi Code", UpdatedAt: now,

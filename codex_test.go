@@ -153,7 +153,7 @@ func TestCollectorRuntimeCancellationJoinsCodexProcessGroup(t *testing.T) {
 	}
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
-	t.Setenv("XDG_CACHE_HOME", dir)
+	setTestCacheHome(t, dir)
 	now := time.Now()
 	cachePath, _ := codexCachePath()
 	previous := codexCacheFile{
@@ -235,7 +235,7 @@ func TestCodexFailurePreservesPrivateCacheAndClaudeCache(t *testing.T) {
 	}
 	temp := t.TempDir()
 	t.Setenv("HOME", temp)
-	t.Setenv("XDG_CACHE_HOME", temp)
+	setTestCacheHome(t, temp)
 	now := time.Now()
 	reset := now.Add(time.Hour)
 	codexPath, _ := codexCachePath()
@@ -282,7 +282,7 @@ func TestObsoleteCodexFailureCannotRegressNewerCache(t *testing.T) {
 		t.Skip("Unix process-group integration test")
 	}
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setTestCacheHome(t, t.TempDir())
 	now := time.Now()
 	newer := now.Add(time.Minute)
 	reset := now.Add(time.Hour)
@@ -305,7 +305,7 @@ func filepathThatDoesNotExist(t *testing.T) string {
 func TestTUIRendersCodexAloneAndRefreshesAsynchronously(t *testing.T) {
 	temp := t.TempDir()
 	t.Setenv("HOME", temp)
-	t.Setenv("XDG_CACHE_HOME", temp)
+	setTestCacheHome(t, temp)
 	now := time.Now()
 	cache := codexCacheFile{
 		Version: cacheVersion, Provider: "OpenAI Codex", PlanType: "plus", UpdatedAt: now,

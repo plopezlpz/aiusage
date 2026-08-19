@@ -96,7 +96,7 @@ func TestClaudeUsageDoesNotScaleFractionsOrLeakTokenAndBody(t *testing.T) {
 func TestCollectClaudeUsesInjectedCredentialsAndPreservesGoodCacheOnFailure(t *testing.T) {
 	temp := t.TempDir()
 	t.Setenv("HOME", temp)
-	t.Setenv("XDG_CACHE_HOME", temp)
+	setTestCacheHome(t, temp)
 	now := time.Now()
 	loader := func(context.Context) (claudeCredentials, error) {
 		return claudeCredentials{AccessToken: "secret", ExpiresAt: now.Add(time.Hour).UnixMilli(), RateLimitTier: "default", SubscriptionType: "max"}, nil
@@ -126,7 +126,7 @@ func TestCollectClaudeUsesInjectedCredentialsAndPreservesGoodCacheOnFailure(t *t
 
 func TestCanceledClaudeCollectionDoesNotMutateCache(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setTestCacheHome(t, t.TempDir())
 	now := time.Now()
 	reset := now.Add(time.Hour)
 	path, _ := cachePath()
@@ -164,7 +164,7 @@ func TestCanceledClaudeCollectionDoesNotMutateCache(t *testing.T) {
 
 func TestClaudeSuccessMergesFableIntoNewerStatusLineCache(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setTestCacheHome(t, t.TempDir())
 	now := time.Now()
 	loader := func(context.Context) (claudeCredentials, error) {
 		return claudeCredentials{AccessToken: "secret", ExpiresAt: now.Add(time.Hour).UnixMilli()}, nil
@@ -193,7 +193,7 @@ func TestClaudeSuccessMergesFableIntoNewerStatusLineCache(t *testing.T) {
 
 func TestClaudeFailurePreservesNewerStatusLineAndRecordsOAuthError(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setTestCacheHome(t, t.TempDir())
 	now := time.Now()
 	loader := func(context.Context) (claudeCredentials, error) {
 		return claudeCredentials{AccessToken: "secret", ExpiresAt: now.Add(time.Hour).UnixMilli()}, nil
@@ -221,7 +221,7 @@ func TestClaudeFailurePreservesNewerStatusLineAndRecordsOAuthError(t *testing.T)
 
 func TestObsoleteClaudeFailureCannotRegressNewerCache(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setTestCacheHome(t, t.TempDir())
 	now := time.Now()
 	newer := now.Add(time.Minute)
 	path, err := cachePath()
@@ -286,7 +286,7 @@ func TestDefaultClaudeClientDisablesProxyAndRedirects(t *testing.T) {
 
 func TestProviderLocksSerializeSameProvider(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", os.Getenv("HOME"))
+	setTestCacheHome(t, os.Getenv("HOME"))
 	for name, lock := range map[string]func() (func(), error){"Codex": lockCodexCache, "Kimi": lockKimiCache} {
 		t.Run(name, func(t *testing.T) {
 			unlock, err := lock()
@@ -325,7 +325,7 @@ func TestProviderLocksSerializeSameProvider(t *testing.T) {
 
 func TestClaudeCacheLockWaitIsBounded(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", os.Getenv("HOME"))
+	setTestCacheHome(t, os.Getenv("HOME"))
 	unlock, err := lockClaudeCache()
 	if err != nil {
 		t.Fatal(err)
