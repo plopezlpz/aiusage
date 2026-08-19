@@ -18,7 +18,7 @@ fail() {
 }
 
 if [ -e "$DIST" ] || [ -L "$DIST" ]; then
-    [ ! -L "$DIST" ] && [ -d "$DIST" ] || fail "dist path is not a real directory: $DIST"
+    if [ -L "$DIST" ] || [ ! -d "$DIST" ]; then fail "dist path is not a real directory: $DIST"; fi
 else
     mkdir "$DIST"
 fi
@@ -48,7 +48,7 @@ copy_go_licenses() {
     [ -s "$GO_MODULES" ] || fail "go list returned no external linked modules"
 
     while IFS='|' read -r MODULE_ID MODULE_DIR; do
-        [ -n "$MODULE_ID" ] && [ -d "$MODULE_DIR" ] || fail "invalid linked Go module metadata: $MODULE_ID"
+        if [ -z "$MODULE_ID" ] || [ ! -d "$MODULE_DIR" ]; then fail "invalid linked Go module metadata: $MODULE_ID"; fi
         MODULE_PATH=${MODULE_ID%% *}
         MODULE_LICENSE_DIR="$GO_LICENSE_ROOT/$MODULE_PATH"
         mkdir -p "$MODULE_LICENSE_DIR"
@@ -89,7 +89,7 @@ validate_licenses() {
 
 validate_app_bundle() {
     BUNDLE="$1"
-    [ ! -L "$BUNDLE" ] && [ -d "$BUNDLE" ] || fail "app bundle is missing or unsafe: $BUNDLE"
+    if [ -L "$BUNDLE" ] || [ ! -d "$BUNDLE" ]; then fail "app bundle is missing or unsafe: $BUNDLE"; fi
     plutil -lint "$BUNDLE/Contents/Info.plist" >/dev/null || fail "packaged Info.plist is malformed"
     [ "$(plutil -extract CFBundleIdentifier raw "$BUNDLE/Contents/Info.plist")" = "$BUNDLE_ID" ] || fail "CFBundleIdentifier is invalid"
     [ "$(plutil -extract CFBundleExecutable raw "$BUNDLE/Contents/Info.plist")" = AiUsage ] || fail "CFBundleExecutable is invalid"
@@ -152,7 +152,7 @@ HOST="$SWIFT_BIN/AiUsage"
 [ "$(lipo -archs "$BUILD/go/aiusage-cli")" = arm64 ] || fail "bundled aiusage is not arm64-only"
 [ "$(lipo -archs "$HOST")" = arm64 ] || fail "app host is not arm64-only"
 
-[ ! -L "$DIST" ] && [ -d "$DIST" ] || fail "dist path is not a real directory: $DIST"
+if [ -L "$DIST" ] || [ ! -d "$DIST" ]; then fail "dist path is not a real directory: $DIST"; fi
 [ ! -L "$FINAL_APP" ] || fail "refusing to replace symlinked app bundle: $FINAL_APP"
 STAGED_APP=$(mktemp -d "$DIST/.AiUsage.build.XXXXXX")
 DIST_BACKUP=""
@@ -224,7 +224,7 @@ if [ "$ACTION" = install ]; then
         mkdir -p "$INSTALL_DIR"
     fi
     if [ -e "$INSTALL_APP" ] || [ -L "$INSTALL_APP" ]; then
-        [ ! -L "$INSTALL_APP" ] && [ -d "$INSTALL_APP" ] || fail "refusing to replace unsafe path: $INSTALL_APP"
+        if [ -L "$INSTALL_APP" ] || [ ! -d "$INSTALL_APP" ]; then fail "refusing to replace unsafe path: $INSTALL_APP"; fi
         [ -f "$INSTALL_APP/Contents/Info.plist" ] || fail "refusing to replace app without Info.plist: $INSTALL_APP"
         EXISTING_ID=$(plutil -extract CFBundleIdentifier raw "$INSTALL_APP/Contents/Info.plist" 2>/dev/null) || fail "refusing to replace app with unreadable bundle identifier: $INSTALL_APP"
         [ "$EXISTING_ID" = "$BUNDLE_ID" ] || fail "refusing to replace app with bundle identifier $EXISTING_ID"
