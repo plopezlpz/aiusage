@@ -143,7 +143,7 @@ final class DashboardSnapshotTests: XCTestCase {
         try """
         #!/bin/sh
         case ":$PATH:" in
-            *":/sbin:/aiusage-inherited/bin:$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.local/share/fnm/aliases/default/bin:"*) ;;
+            *":/sbin:/aiusage-inherited/bin:$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.local/share/fnm/aliases/default/bin:$HOME/.nvm/current/bin:$HOME/.volta/bin:$HOME/.asdf/shims:$HOME/.local/share/mise/shims:$HOME/.nodenv/shims:"*) ;;
             *) echo "CLI path ordering is invalid" >&2; exit 1 ;;
         esac
         cat <<'JSON'

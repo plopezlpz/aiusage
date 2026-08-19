@@ -55,7 +55,7 @@ To build from source, use an Apple Silicon Mac, Swift 6, and Xcode 16 or newer. 
 open dist/AiUsage.app
 ```
 
-Install a source build into `~/Applications` with `./scripts/macos.sh install`. The installer does not add the terminal command to `PATH`; use `go install .` separately when wanted. Quit a running AI Usage app before replacing it.
+Install a source build into `~/Applications` with `./scripts/macos.sh install`. The installer does not add the terminal command to `PATH`; use `go install .` separately when wanted. Finder does not inherit your shell `PATH`, so the app also checks Homebrew, `~/.local/bin`, Kimi's install directory, and common Node-manager paths; link unusual CLI installs into `~/.local/bin`. Quit a running AI Usage app before replacing it.
 
 Left-click the menu-bar icon to open the compact panel. Use Refresh or Command-R to force collection, click a quota for details, press Escape or click outside to hide, and use the visible Quit button, Command-Q, or the right-click Quit menu to exit.
 

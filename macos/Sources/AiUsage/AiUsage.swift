@@ -574,7 +574,12 @@ final class DashboardStore: ObservableObject {
         let userPaths = [
             "\(home)/.local/bin",
             "\(home)/.kimi-code/bin",
-            "\(home)/.local/share/fnm/aliases/default/bin"
+            "\(home)/.local/share/fnm/aliases/default/bin",
+            "\(home)/.nvm/current/bin",
+            "\(home)/.volta/bin",
+            "\(home)/.asdf/shims",
+            "\(home)/.local/share/mise/shims",
+            "\(home)/.nodenv/shims"
         ]
         let inheritedPaths = environment["PATH", default: ""].split(separator: ":").map(String.init)
         environment["PATH"] = (standardPaths + inheritedPaths + userPaths).reduce(into: [String]()) {
