@@ -93,8 +93,10 @@ validate_app_bundle() {
     plutil -lint "$BUNDLE/Contents/Info.plist" >/dev/null || fail "packaged Info.plist is malformed"
     [ "$(plutil -extract CFBundleIdentifier raw "$BUNDLE/Contents/Info.plist")" = "$BUNDLE_ID" ] || fail "CFBundleIdentifier is invalid"
     [ "$(plutil -extract CFBundleExecutable raw "$BUNDLE/Contents/Info.plist")" = AiUsage ] || fail "CFBundleExecutable is invalid"
+    [ "$(plutil -extract CFBundleIconFile raw "$BUNDLE/Contents/Info.plist")" = AppIcon ] || fail "CFBundleIconFile is invalid"
     [ "$(plutil -extract LSUIElement raw "$BUNDLE/Contents/Info.plist")" = true ] || fail "LSUIElement must be true"
     [ -x "$BUNDLE/Contents/MacOS/AiUsage" ] || fail "packaged app host is missing"
+    [ -s "$BUNDLE/Contents/Resources/AppIcon.icns" ] || fail "packaged app icon is missing"
     [ -x "$BUNDLE/Contents/MacOS/aiusage-cli" ] || fail "packaged aiusage is missing"
     for PROVIDER_ICON in claude openai kimi; do
         [ -s "$BUNDLE/Contents/Resources/ProviderIcons/$PROVIDER_ICON.svg" ] || fail "packaged $PROVIDER_ICON icon is missing"
@@ -133,6 +135,7 @@ if [ "$ACTION" = install ]; then
 fi
 [ -f "$MACOS/Package.swift" ] || fail "missing macos/Package.swift"
 [ -f "$MACOS/Info.plist" ] || fail "missing macos/Info.plist"
+[ -s "$MACOS/Resources/AppIcon.icns" ] || fail "missing app icon"
 [ -f "$ROOT/LICENSE" ] || fail "missing project LICENSE"
 [ -f "$MACOS/Resources/Licenses/lobe-icons-LICENSE.txt" ] || fail "missing Lobe Icons license"
 for PROVIDER_ICON in claude openai kimi; do
@@ -179,6 +182,7 @@ trap 'exit 143' TERM
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/Licenses" "$APP/Contents/Resources/ProviderIcons"
 ditto "$MACOS/Info.plist" "$APP/Contents/Info.plist"
+ditto "$MACOS/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 ditto "$HOST" "$APP/Contents/MacOS/AiUsage"
 ditto "$BUILD/go/aiusage-cli" "$APP/Contents/MacOS/aiusage-cli"
 ditto "$ROOT/LICENSE" "$APP/Contents/Resources/Licenses/aiusage-LICENSE.txt"
