@@ -300,10 +300,8 @@ final class DashboardStore: ObservableObject {
         let terminationState = lifecycle.terminationState
         let active = terminationState.target ?? original
         var descendants = existing
-        if Self.isLive(active) {
-            for target in Self.observedDescendants(of: active) {
-                descendants[target.identity.pid] = target
-            }
+        for target in Self.observedSessionMembers(of: active) + Self.observedDescendants(of: active) {
+            descendants[target.identity.pid] = target
         }
         let remaining = Self.verifiedTargets(Array(descendants.values))
         if Date() >= deadline {
@@ -323,39 +321,45 @@ final class DashboardStore: ObservableObject {
             completion()
             return
         }
-        if Self.isLive(active) {
-            active.process.terminate()
-        } else {
-            Self.signalVerified(remaining, signal: SIGTERM)
-        }
+        Self.signalVerified(remaining, signal: SIGTERM)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             self?.pollTermination(target: active, descendants: descendants, deadline: deadline, completion: completion)
         }
     }
 
     private nonisolated static func forceStop(_ active: ActiveHelper, retainedDescendants: [DescendantTarget]) {
-        guard isLive(active) else {
-            signalVerified(retainedDescendants, signal: SIGKILL)
-            return
+        var targets = Dictionary(uniqueKeysWithValues: retainedDescendants.map { ($0.identity.pid, $0) })
+        for pass in 0..<4 {
+            for target in observedSessionMembers(of: active) + observedDescendants(of: active) {
+                targets[target.identity.pid] = target
+            }
+            if let identity = active.identity, processIdentityMatches(identity, darwinProcessIdentity(active.pid)) {
+                targets[active.pid] = DescendantTarget(identity: identity, depth: 0)
+            }
+            signalVerified(Array(targets.values), signal: SIGSTOP)
+            if pass < 3 { usleep(50_000) }
         }
-        guard !isSessionLeader(active) else {
-            killActiveSession(active)
-            signalVerified(retainedDescendants, signal: SIGKILL)
-            return
-        }
-        killActiveTree(active, retainedDescendants: retainedDescendants)
+        signalVerified(Array(targets.values), signal: SIGKILL)
     }
 
     private nonisolated static func isLive(_ active: ActiveHelper) -> Bool {
-        guard active.pid > 1,
-              active.process.processIdentifier == active.pid,
-              active.process.isRunning else { return false }
-        guard let identity = active.identity else { return true }
+        guard active.pid > 1, let identity = active.identity else { return false }
         return processIdentityMatches(identity, darwinProcessIdentity(active.pid))
     }
 
-    private nonisolated static func isSessionLeader(_ active: ActiveHelper) -> Bool {
-        isLive(active) && getsid(active.pid) == active.pid
+    private nonisolated static func observedSessionMembers(of active: ActiveHelper) -> [DescendantTarget] {
+        guard active.pid > 1, active.identity != nil else { return [] }
+        return allPIDs().compactMap { candidate in
+            guard candidate > 1,
+                  getsid(candidate) == active.pid,
+                  let identity = darwinProcessIdentity(candidate),
+                  getsid(candidate) == active.pid,
+                  processIdentityMatches(identity, darwinProcessIdentity(candidate)) else { return nil }
+            let depth = candidate == active.pid
+                ? 0
+                : descendantDepth(pid: candidate, ancestor: active.pid, parentOf: darwinParentPID) ?? 1
+            return DescendantTarget(identity: identity, depth: depth)
+        }
     }
 
     private nonisolated static func observedDescendants(of active: ActiveHelper) -> [DescendantTarget] {
@@ -383,75 +387,6 @@ final class DashboardStore: ObservableObject {
         }
     }
 
-    private nonisolated static func killActiveTree(_ active: ActiveHelper, retainedDescendants: [DescendantTarget]) {
-        guard isLive(active), kill(active.pid, SIGSTOP) == 0, isLive(active) else {
-            killActivePID(active)
-            signalVerified(retainedDescendants, signal: SIGKILL)
-            return
-        }
-
-        var descendants = Dictionary(uniqueKeysWithValues: retainedDescendants.map { ($0.identity.pid, $0) })
-        for pass in 0..<4 {
-            guard isLive(active) else {
-                signalVerified(Array(descendants.values), signal: SIGKILL)
-                return
-            }
-            for target in observedDescendants(of: active) {
-                descendants[target.identity.pid] = target
-            }
-            signalVerified(Array(descendants.values), signal: SIGKILL)
-            if pass < 3 { usleep(50_000) }
-        }
-        killActivePID(active)
-        signalVerified(Array(descendants.values), signal: SIGKILL)
-    }
-
-    private nonisolated static func killActiveSession(_ active: ActiveHelper) {
-        guard isSessionLeader(active), kill(active.pid, SIGSTOP) == 0, isSessionLeader(active) else {
-            killActivePID(active)
-            return
-        }
-
-        for pass in 0..<4 {
-            guard isSessionLeader(active) else {
-                killActivePID(active)
-                return
-            }
-            for candidate in allPIDs() where candidate > 1 && candidate != active.pid {
-                guard isSessionLeader(active) else {
-                    killActivePID(active)
-                    return
-                }
-                guard getsid(candidate) == active.pid,
-                      isSessionLeader(active),
-                      getsid(candidate) == active.pid else { continue }
-                kill(candidate, SIGKILL)
-            }
-            if pass < 3 { usleep(50_000) }
-        }
-
-        killSessionLeader(active)
-    }
-
-    private nonisolated static func killSessionLeader(_ active: ActiveHelper) {
-        guard isSessionLeader(active) else {
-            killActivePID(active)
-            return
-        }
-        kill(active.pid, SIGKILL)
-        waitForExit(active)
-    }
-
-    private nonisolated static func killActivePID(_ active: ActiveHelper) {
-        guard isLive(active) else { return }
-        kill(active.pid, SIGKILL)
-        waitForExit(active)
-    }
-
-    private nonisolated static func waitForExit(_ active: ActiveHelper) {
-        for _ in 0..<20 where active.process.isRunning { usleep(10_000) }
-    }
-
     private nonisolated static func allPIDs() -> [pid_t] {
         let maximumCapacity = 131_072
         let reported = max(Int(proc_listallpids(nil, 0)), 0)
@@ -477,49 +412,158 @@ final class DashboardStore: ObservableObject {
         timeout: TimeInterval = 20
     ) -> Result<DashboardSnapshot, Error> {
         let deadline = DispatchTime.now() + timeout
-        let process = Process()
+        let run = HelperRun()
         let stdout = Pipe()
         let stderr = Pipe()
-        let exited = DispatchSemaphore(value: 0)
-        process.executableURL = executable
-        process.arguments = kind.arguments
-        process.environment = childEnvironment()
-        process.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
-        process.standardOutput = stdout
-        process.standardError = stderr
-        process.terminationHandler = { _ in exited.signal() }
 
-        guard lifecycle.prepare(process) else {
+        guard lifecycle.prepare(run) else {
             return .failure(DashboardDataError.invalid("Dashboard stopped."))
         }
-        defer { lifecycle.finish(process) }
+        defer { lifecycle.finish(run) }
 
         do {
-            try process.run()
-            let stopRequested = lifecycle.didRun(process)
-            guard let active = lifecycle.activeTarget(for: process) else {
-                throw DashboardDataError.invalid("Dashboard stopped.")
+            var fileActions: posix_spawn_file_actions_t?
+            guard posix_spawn_file_actions_init(&fileActions) == 0 else {
+                throw DashboardDataError.invalid("Dashboard helper could not be started.")
             }
+            defer { posix_spawn_file_actions_destroy(&fileActions) }
+
+            let stdoutRead = stdout.fileHandleForReading.fileDescriptor
+            let stderrRead = stderr.fileHandleForReading.fileDescriptor
+            var duplicatedSources: [Int32] = []
+            defer { duplicatedSources.forEach { close($0) } }
+            func spawnSource(_ descriptor: Int32) -> Int32? {
+                guard descriptor <= STDERR_FILENO else { return descriptor }
+                let duplicate = fcntl(descriptor, F_DUPFD_CLOEXEC, STDERR_FILENO + 1)
+                if duplicate >= 0 { duplicatedSources.append(duplicate) }
+                return duplicate >= 0 ? duplicate : nil
+            }
+            guard let stdoutWrite = spawnSource(stdout.fileHandleForWriting.fileDescriptor),
+                  let stderrWrite = spawnSource(stderr.fileHandleForWriting.fileDescriptor),
+                  posix_spawn_file_actions_addclose(&fileActions, stdoutRead) == 0,
+                  posix_spawn_file_actions_addclose(&fileActions, stderrRead) == 0,
+                  posix_spawn_file_actions_adddup2(&fileActions, stdoutWrite, STDOUT_FILENO) == 0,
+                  posix_spawn_file_actions_adddup2(&fileActions, stderrWrite, STDERR_FILENO) == 0,
+                  posix_spawn_file_actions_addclose(&fileActions, stdoutWrite) == 0,
+                  posix_spawn_file_actions_addclose(&fileActions, stderrWrite) == 0,
+                  posix_spawn_file_actions_addchdir_np(
+                    &fileActions,
+                    FileManager.default.homeDirectoryForCurrentUser.path
+                  ) == 0 else {
+                throw DashboardDataError.invalid("Dashboard helper could not be started.")
+            }
+
+            var attributes: posix_spawnattr_t?
+            guard posix_spawnattr_init(&attributes) == 0 else {
+                throw DashboardDataError.invalid("Dashboard helper could not be started.")
+            }
+            defer { posix_spawnattr_destroy(&attributes) }
+            var defaultSignals = sigset_t()
+            var signalMask = sigset_t()
+            sigemptyset(&defaultSignals)
+            sigemptyset(&signalMask)
+            for signal in [SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGPIPE] { sigaddset(&defaultSignals, signal) }
+            let flags = Int16(
+                POSIX_SPAWN_SETSID | POSIX_SPAWN_START_SUSPENDED | POSIX_SPAWN_CLOEXEC_DEFAULT |
+                POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK
+            )
+            guard posix_spawnattr_setsigdefault(&attributes, &defaultSignals) == 0,
+                  posix_spawnattr_setsigmask(&attributes, &signalMask) == 0,
+                  posix_spawnattr_setflags(&attributes, flags) == 0 else {
+                throw DashboardDataError.invalid("Dashboard helper could not be started.")
+            }
+
+            let argumentStrings = [executable.path] + kind.arguments
+            let environmentStrings = childEnvironment().map { "\($0.key)=\($0.value)" }.sorted()
+            var arguments: [UnsafeMutablePointer<CChar>?] = argumentStrings.map { strdup($0) } + [nil]
+            var environment: [UnsafeMutablePointer<CChar>?] = environmentStrings.map { strdup($0) } + [nil]
+            defer {
+                arguments.dropLast().forEach { free($0) }
+                environment.dropLast().forEach { free($0) }
+            }
+            guard arguments.dropLast().allSatisfy({ $0 != nil }),
+                  environment.dropLast().allSatisfy({ $0 != nil }) else {
+                throw DashboardDataError.invalid("Dashboard helper could not be started.")
+            }
+
+            var pid: pid_t = 0
+            let spawnResult = executable.path.withCString { path in
+                arguments.withUnsafeMutableBufferPointer { argv in
+                    environment.withUnsafeMutableBufferPointer { envp in
+                        posix_spawn(&pid, path, &fileActions, &attributes, argv.baseAddress!, envp.baseAddress!)
+                    }
+                }
+            }
+            duplicatedSources.forEach { close($0) }
+            duplicatedSources.removeAll()
+            guard spawnResult == 0 else {
+                throw DashboardDataError.invalid("Dashboard helper could not be started.")
+            }
+
+            try? stdout.fileHandleForWriting.close()
+            try? stderr.fileHandleForWriting.close()
             let output = CapturedOutput(stdout: stdout.fileHandleForReading, stderr: stderr.fileHandleForReading)
             defer { output.close() }
-            if stopRequested, process.isRunning { process.terminate() }
 
-            let exitedBeforeDeadline = exited.wait(timeout: deadline) == .success
-            guard exitedBeforeDeadline, !process.isRunning, output.wait(until: deadline) else {
+            guard let identity = darwinProcessIdentity(pid), getsid(pid) == pid else {
+                kill(pid, SIGKILL)
+                reapBlocking(pid)
+                throw DashboardDataError.invalid("Dashboard helper isolation failed.")
+            }
+            let stopRequested = lifecycle.didSpawn(run, pid: pid, identity: identity)
+            guard let active = lifecycle.activeTarget(for: run) else {
+                kill(pid, SIGKILL)
+                reapBlocking(pid)
+                throw DashboardDataError.invalid("Dashboard stopped.")
+            }
+            if stopRequested {
+                forceStop(active, retainedDescendants: [])
+            } else if kill(pid, SIGCONT) != 0 {
+                forceStop(active, retainedDescendants: [])
+                reapBlocking(pid)
+                throw DashboardDataError.invalid("Dashboard helper could not be started.")
+            }
+
+            var status: Int32 = 0
+            guard reap(pid, status: &status, until: deadline) else {
+                forceStop(active, retainedDescendants: [])
+                _ = reap(pid, status: &status, until: .now() + 1)
+                output.close()
+                _ = output.wait(until: .now() + 1)
+                throw DashboardDataError.invalid("Dashboard helper timed out.")
+            }
+            guard output.wait(until: deadline) else {
                 forceStop(active, retainedDescendants: [])
                 output.close()
                 _ = output.wait(until: .now() + 1)
                 throw DashboardDataError.invalid("Dashboard helper timed out.")
             }
             guard !output.stdoutOverflow else { throw DashboardDataError.invalid("Dashboard response exceeded 1 MB.") }
-            guard process.terminationStatus == 0 else {
+            guard status == 0 else {
                 let detail = String(decoding: output.stderr, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
                 throw DashboardDataError.invalid(detail.isEmpty ? "Dashboard helper exited unexpectedly." : detail)
             }
             return .success(try DashboardSnapshot.decode(output.stdout))
         } catch {
+            try? stdout.fileHandleForWriting.close()
+            try? stderr.fileHandleForWriting.close()
             return .failure(error)
         }
+    }
+
+    private nonisolated static func reapBlocking(_ pid: pid_t) {
+        var status: Int32 = 0
+        while waitpid(pid, &status, 0) < 0, errno == EINTR {}
+    }
+
+    private nonisolated static func reap(_ pid: pid_t, status: inout Int32, until deadline: DispatchTime) -> Bool {
+        while DispatchTime.now().uptimeNanoseconds < deadline.uptimeNanoseconds {
+            let result = waitpid(pid, &status, WNOHANG)
+            if result == pid { return true }
+            if result < 0, errno != EINTR { return false }
+            usleep(10_000)
+        }
+        return waitpid(pid, &status, WNOHANG) == pid
     }
 
     private nonisolated static func childEnvironment() -> [String: String] {
@@ -534,8 +578,10 @@ final class DashboardStore: ObservableObject {
     }
 }
 
-struct ActiveHelper: @unchecked Sendable {
-    let process: Process
+final class HelperRun: @unchecked Sendable {}
+
+struct ActiveHelper: Sendable {
+    let run: HelperRun
     let pid: pid_t
     let identity: DarwinProcessIdentity?
 }
@@ -562,38 +608,37 @@ final class HelperLifecycle: @unchecked Sendable {
         let target = retainedTerminationTarget
         return HelperTerminationState(
             target: target,
-            isPrepared: target?.pid == 0 && active?.process === target?.process && active?.pid == 0
+            isPrepared: target?.pid == 0 && active?.run === target?.run && active?.pid == 0
         )
     }
 
-    func prepare(_ process: Process) -> Bool {
+    func prepare(_ run: HelperRun) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         guard !stopping else { return false }
-        active = ActiveHelper(process: process, pid: 0, identity: nil)
+        active = ActiveHelper(run: run, pid: 0, identity: nil)
         return true
     }
 
-    func didRun(_ process: Process) -> Bool {
-        let pid = process.processIdentifier
-        let started = ActiveHelper(process: process, pid: pid, identity: darwinProcessIdentity(pid))
+    func didSpawn(_ run: HelperRun, pid: pid_t, identity: DarwinProcessIdentity) -> Bool {
+        let started = ActiveHelper(run: run, pid: pid, identity: identity)
         lock.lock()
         defer { lock.unlock() }
-        guard active?.process === process else { return stopping }
+        guard active?.run === run else { return stopping }
         active = started
         if stopping { retainedTerminationTarget = started }
         return stopping
     }
 
-    func activeTarget(for process: Process) -> ActiveHelper? {
+    func activeTarget(for run: HelperRun) -> ActiveHelper? {
         lock.lock()
         defer { lock.unlock() }
-        return active?.process === process ? active : nil
+        return active?.run === run ? active : nil
     }
 
-    func finish(_ process: Process) {
+    func finish(_ run: HelperRun) {
         lock.lock()
-        if active?.process === process { active = nil }
+        if active?.run === run { active = nil }
         lock.unlock()
     }
 

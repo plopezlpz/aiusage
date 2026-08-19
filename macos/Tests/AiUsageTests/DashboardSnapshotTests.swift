@@ -93,35 +93,153 @@ final class DashboardSnapshotTests: XCTestCase {
         XCTAssertFalse(processIdentityMatches(expected, DarwinProcessIdentity(pid: 42, startSeconds: 100, startMicroseconds: 201)))
     }
 
-    func testTerminationStateAtomicallyTracksPreparedAndStartedTarget() throws {
+    func testTerminationStateAtomicallyTracksPreparedAndStartedTarget() {
         let lifecycle = HelperLifecycle()
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sleep")
-        process.arguments = ["1"]
+        let run = HelperRun()
+        let identity = DarwinProcessIdentity(pid: 42, startSeconds: 100, startMicroseconds: 200)
 
-        XCTAssertTrue(lifecycle.prepare(process))
+        XCTAssertTrue(lifecycle.prepare(run))
         XCTAssertEqual(lifecycle.beginStop()?.pid, 0)
         XCTAssertTrue(lifecycle.terminationState.isPrepared)
+        XCTAssertTrue(lifecycle.didSpawn(run, pid: identity.pid, identity: identity))
 
-        try process.run()
-        defer {
-            if process.isRunning {
-                process.terminate()
-                process.waitUntilExit()
-            }
-        }
-        XCTAssertTrue(lifecycle.didRun(process))
         let started = lifecycle.terminationState
         XCTAssertFalse(started.isPrepared)
-        XCTAssertGreaterThan(started.target?.pid ?? 0, 1)
-        XCTAssertNotNil(started.target?.identity)
+        XCTAssertEqual(started.target?.identity, identity)
 
-        process.terminate()
-        process.waitUntilExit()
-        lifecycle.finish(process)
+        lifecycle.finish(run)
         let finished = lifecycle.terminationState
         XCTAssertFalse(finished.isPrepared)
-        XCTAssertEqual(finished.target?.pid, started.target?.pid)
+        XCTAssertEqual(finished.target?.identity, identity)
+    }
+
+    func testHelperExecutableIsSessionLeader() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let helper = directory.appendingPathComponent("helper.sh")
+        let now = Int64(Date().timeIntervalSince1970)
+        try """
+        #!/bin/sh
+        cat <<'JSON'
+        {"version":1,"generatedAt":\(now),"state":"ready","message":"","quotas":[]}
+        JSON
+        """.write(to: helper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helper.path)
+
+        let result = DashboardStore.runHelper(.cache, executable: helper, lifecycle: HelperLifecycle(), timeout: 2)
+        guard case .success(let snapshot) = result else { return XCTFail("helper could not create an isolated session: \(result)") }
+        XCTAssertEqual(snapshot.version, 1)
+    }
+
+    func testHelperWorksWithClosedStandardOutputDescriptors() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let helper = directory.appendingPathComponent("helper.sh")
+        let now = Int64(Date().timeIntervalSince1970)
+        try """
+        #!/bin/sh
+        cat <<'JSON'
+        {"version":1,"generatedAt":\(now),"state":"ready","message":"","quotas":[]}
+        JSON
+        """.write(to: helper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helper.path)
+
+        let savedStdout = dup(STDOUT_FILENO)
+        let savedStderr = dup(STDERR_FILENO)
+        XCTAssertGreaterThan(savedStdout, STDERR_FILENO)
+        XCTAssertGreaterThan(savedStderr, STDERR_FILENO)
+        let result: Result<DashboardSnapshot, Error> = {
+            close(STDOUT_FILENO)
+            close(STDERR_FILENO)
+            defer {
+                dup2(savedStdout, STDOUT_FILENO)
+                dup2(savedStderr, STDERR_FILENO)
+                close(savedStdout)
+                close(savedStderr)
+            }
+            return DashboardStore.runHelper(.cache, executable: helper, lifecycle: HelperLifecycle(), timeout: 2)
+        }()
+
+        guard case .success(let snapshot) = result else { return XCTFail("helper output was not captured: \(result)") }
+        XCTAssertEqual(snapshot.version, 1)
+    }
+
+    @MainActor
+    func testStoreStopTerminatesNestedHelperTree() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let helperPIDFile = directory.appendingPathComponent("helper.pid")
+        let childPIDFile = directory.appendingPathComponent("child.pid")
+        let helper = directory.appendingPathComponent("helper.sh")
+        try """
+        #!/bin/sh
+        printf '%s\n' "$$" > '\(helperPIDFile.path)'
+        sleep 30 &
+        child=$!
+        printf '%s\n' "$child" > '\(childPIDFile.path)'
+        wait "$child"
+        """.write(to: helper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helper.path)
+
+        let store = DashboardStore(executable: helper)
+        store.request(.cache)
+        let readyDeadline = Date().addingTimeInterval(2)
+        while (!FileManager.default.fileExists(atPath: helperPIDFile.path) ||
+               !FileManager.default.fileExists(atPath: childPIDFile.path)), Date() < readyDeadline {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        guard FileManager.default.fileExists(atPath: helperPIDFile.path),
+              FileManager.default.fileExists(atPath: childPIDFile.path) else {
+            store.stop {}
+            return XCTFail("nested helper did not start")
+        }
+
+        let helperPID = try XCTUnwrap(pid_t(String(contentsOf: helperPIDFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
+        let childPID = try XCTUnwrap(pid_t(String(contentsOf: childPIDFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
+        let stopped = expectation(description: "store stopped")
+        store.stop { stopped.fulfill() }
+        await fulfillment(of: [stopped], timeout: 5)
+
+        XCTAssertNotEqual(kill(helperPID, 0), 0)
+        XCTAssertNotEqual(kill(childPID, 0), 0)
+    }
+
+    func testExitedHelperCannotLeaveSessionChild() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let childPIDFile = directory.appendingPathComponent("child.pid")
+        let helper = directory.appendingPathComponent("helper.sh")
+        try """
+        #!/bin/sh
+        sleep 30 &
+        printf '%s\n' "$!" > '\(childPIDFile.path)'
+        exit 0
+        """.write(to: helper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helper.path)
+
+        let result = DashboardStore.runHelper(.cache, executable: helper, lifecycle: HelperLifecycle(), timeout: 2)
+        guard case .failure(let error) = result else { return XCTFail("expected helper timeout") }
+        XCTAssertEqual(error.localizedDescription, "Dashboard helper timed out.")
+
+        let childPIDText = try String(contentsOf: childPIDFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        let childPID = try XCTUnwrap(pid_t(childPIDText))
+        let childExitDeadline = Date().addingTimeInterval(2)
+        while kill(childPID, 0) == 0 || errno == EPERM {
+            guard Date() < childExitDeadline else {
+                XCTFail("exited helper left session child \(childPID) running")
+                break
+            }
+            usleep(10_000)
+        }
+        XCTAssertNotEqual(kill(childPID, 0), 0)
     }
 
     func testHelperTimeoutDoesNotBlockNextRun() throws {
