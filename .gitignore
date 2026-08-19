@@ -1,0 +1,9 @@
+/aiusage
+*.test
+coverage.out
+.DS_Store
+/.build/
+/dist/
+/macos/.build/
+/macos/.swiftpm/
+/context.md

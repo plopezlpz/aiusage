@@ -1,0 +1,128 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-tag:
+    name: Validate tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - id: tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "release tag must be vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+  cli:
+    name: CLI (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: validate-tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+      - name: Build archive
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          name="aiusage-${TAG}-${GOOS}-${GOARCH}"
+          mkdir package
+          if [ "$GOOS" = windows ]; then
+            go build -trimpath -o package/aiusage.exe .
+            cp LICENSE package/LICENSE
+            (cd package && zip "../${name}.zip" aiusage.exe LICENSE)
+          else
+            go build -trimpath -o package/aiusage .
+            cp LICENSE package/LICENSE
+            tar -C package -czf "${name}.tar.gz" aiusage LICENSE
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-cli-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: aiusage-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}.*
+          if-no-files-found: error
+
+  macos-app:
+    name: macOS app (arm64)
+    needs: validate-tag
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+      - name: Build, verify, and package app
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+        run: |
+          set -eu
+          plutil -replace CFBundleShortVersionString -string "$VERSION" macos/Info.plist
+          plutil -replace CFBundleVersion -string "$GITHUB_RUN_NUMBER" macos/Info.plist
+          ./scripts/macos.sh build
+          ditto -c -k --sequesterRsrc --keepParent dist/AiUsage.app "AiUsage-${TAG}-macos-arm64.zip"
+          ditto -x -k "AiUsage-${TAG}-macos-arm64.zip" packaged
+          test -x packaged/AiUsage.app/Contents/MacOS/AiUsage
+          test -x packaged/AiUsage.app/Contents/MacOS/aiusage-cli
+          test "$(plutil -extract CFBundleShortVersionString raw packaged/AiUsage.app/Contents/Info.plist)" = "$VERSION"
+          test "$(plutil -extract CFBundleVersion raw packaged/AiUsage.app/Contents/Info.plist)" = "$GITHUB_RUN_NUMBER"
+          codesign --verify --deep --strict packaged/AiUsage.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-app
+          path: AiUsage-${{ github.ref_name }}-macos-arm64.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [cli, macos-app]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+      - name: Create checksums
+        run: (cd release && sha256sum -- * > checksums.txt)
+      - name: Create release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
