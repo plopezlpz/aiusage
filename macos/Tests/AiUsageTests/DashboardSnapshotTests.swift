@@ -133,6 +133,37 @@ final class DashboardSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.version, 1)
     }
 
+    func testHelperPathIncludesUserCLIInstallLocations() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let helper = directory.appendingPathComponent("helper.sh")
+        let now = Int64(Date().timeIntervalSince1970)
+        try """
+        #!/bin/sh
+        case ":$PATH:" in
+            *":/sbin:/aiusage-inherited/bin:$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.local/share/fnm/aliases/default/bin:"*) ;;
+            *) echo "CLI path ordering is invalid" >&2; exit 1 ;;
+        esac
+        cat <<'JSON'
+        {"version":1,"generatedAt":\(now),"state":"ready","message":"","quotas":[]}
+        JSON
+        """.write(to: helper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helper.path)
+
+        let originalPath = getenv("PATH").map { String(cString: $0) }
+        let result: Result<DashboardSnapshot, Error> = {
+            setenv("PATH", "/aiusage-inherited/bin:/usr/bin", 1)
+            defer {
+                if let originalPath { setenv("PATH", originalPath, 1) } else { unsetenv("PATH") }
+            }
+            return DashboardStore.runHelper(.cache, executable: helper, lifecycle: HelperLifecycle(), timeout: 2)
+        }()
+        guard case .success(let snapshot) = result else { return XCTFail("helper PATH was incomplete: \(result)") }
+        XCTAssertEqual(snapshot.version, 1)
+    }
+
     func testHelperWorksWithClosedStandardOutputDescriptors() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

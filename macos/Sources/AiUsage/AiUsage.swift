@@ -570,8 +570,14 @@ final class DashboardStore: ObservableObject {
         var environment = ProcessInfo.processInfo.environment
         environment["AIUSAGE_MACOS_HOST_HELPER"] = "1"
         let standardPaths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let userPaths = [
+            "\(home)/.local/bin",
+            "\(home)/.kimi-code/bin",
+            "\(home)/.local/share/fnm/aliases/default/bin"
+        ]
         let inheritedPaths = environment["PATH", default: ""].split(separator: ":").map(String.init)
-        environment["PATH"] = (standardPaths + inheritedPaths).reduce(into: [String]()) {
+        environment["PATH"] = (standardPaths + inheritedPaths + userPaths).reduce(into: [String]()) {
             if !$0.contains($1) { $0.append($1) }
         }.joined(separator: ":")
         return environment
