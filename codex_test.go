@@ -128,7 +128,7 @@ printf '%s\n' '{"id":1,"result":{}}'
 read initialized || exit 4
 read account || exit 5
 read limits || exit 6
-exit 0
+wait
 `), 0o700); err != nil {
 		t.Fatal(err)
 	}

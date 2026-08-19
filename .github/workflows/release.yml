@@ -45,8 +45,8 @@ jobs:
           - goos: windows
             goarch: amd64
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: 1.26.6
       - name: Build archive
@@ -68,7 +68,7 @@ jobs:
             cp LICENSE package/LICENSE
             tar -C package -czf "${name}.tar.gz" aiusage LICENSE
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-cli-${{ matrix.goos }}-${{ matrix.goarch }}
           path: aiusage-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}.*
@@ -80,8 +80,8 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: 1.26.6
       - name: Build, verify, and package app
@@ -100,7 +100,7 @@ jobs:
           test "$(plutil -extract CFBundleShortVersionString raw packaged/AiUsage.app/Contents/Info.plist)" = "$VERSION"
           test "$(plutil -extract CFBundleVersion raw packaged/AiUsage.app/Contents/Info.plist)" = "$GITHUB_RUN_NUMBER"
           codesign --verify --deep --strict packaged/AiUsage.app
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-macos-app
           path: AiUsage-${{ github.ref_name }}-macos-arm64.zip
@@ -114,7 +114,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: release-*
           path: release
