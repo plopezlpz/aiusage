@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -416,6 +417,7 @@ func parseKimiUsage(body []byte, now time.Time) ([]kimiCachedQuota, error) {
 	if len(quotas) == 0 {
 		return nil, errors.New("Kimi returned no usable quota windows")
 	}
+	orderKimiQuotas(quotas)
 	return quotas, nil
 }
 
@@ -450,7 +452,7 @@ func parseKimiWindow(window kimiUsageWindow, now time.Time) (kimiCachedQuota, er
 		WindowUnit:          unit,
 		Used:                *window.Used,
 		Limit:               *window.Limit,
-		RemainingPercentage: 100 * (*window.Limit - *window.Used) / *window.Limit,
+		RemainingPercentage: (*window.Limit - *window.Used) / *window.Limit * 100,
 		ResetsAt:            reset,
 	}, nil
 }
@@ -489,6 +491,12 @@ func kimiWindowLabel(duration int64, unit string) string {
 	return fmt.Sprintf("%d %ss", duration, unit)
 }
 
+func orderKimiQuotas(quotas []kimiCachedQuota) {
+	sort.SliceStable(quotas, func(i, j int) bool {
+		return quotas[i].Window == "5-hour" && quotas[j].Window != "5-hour"
+	})
+}
+
 func readKimiCache() (kimiCacheFile, error) {
 	path, err := kimiCachePath()
 	if err != nil {
@@ -505,6 +513,7 @@ func readKimiCache() (kimiCacheFile, error) {
 	if err := validateKimiCache(cache, time.Now()); err != nil {
 		return kimiCacheFile{}, err
 	}
+	orderKimiQuotas(cache.Quotas)
 	return cache, nil
 }
 
@@ -540,7 +549,7 @@ func validateKimiCache(cache kimiCacheFile, now time.Time) error {
 		if math.IsNaN(quota.Used) || math.IsInf(quota.Used, 0) || math.IsNaN(quota.Limit) || math.IsInf(quota.Limit, 0) || quota.Used < 0 || quota.Limit <= 0 || quota.Used > quota.Limit {
 			return errors.New("Kimi cache used/limit values are invalid")
 		}
-		remaining := 100 * (quota.Limit - quota.Used) / quota.Limit
+		remaining := (quota.Limit - quota.Used) / quota.Limit * 100
 		if math.IsNaN(quota.RemainingPercentage) || math.IsInf(quota.RemainingPercentage, 0) || quota.RemainingPercentage < 0 || quota.RemainingPercentage > 100 || math.Abs(quota.RemainingPercentage-remaining) > 1e-9 {
 			return errors.New("Kimi cache remaining_percentage is invalid")
 		}

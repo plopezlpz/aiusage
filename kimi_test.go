@@ -22,20 +22,41 @@ func TestParseKimiUsageNormalizesSummaryAndLimits(t *testing.T) {
 	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 	input := fmt.Sprintf(`{
 		"code":0,
-		"data":{"kind":"ok","summary":{"window":{"duration":5,"unit":"hour"},"used":25,"limit":100,"reset_at":%q,"ignored":true},
-		"limits":[{"window":{"duration":7,"unit":"days"},"used":1,"limit":4,"reset_at":%q}],"extra_usage":{"ignored":true}},
+		"data":{"kind":"ok","summary":{"window":{"duration":7,"unit":"days"},"used":1,"limit":4,"reset_at":%q,"ignored":true},
+		"limits":[{"window":{"duration":5,"unit":"hour"},"used":25,"limit":100,"reset_at":%q}],"extra_usage":{"ignored":true}},
 		"unknown":"ignored"
-	}`, now.Add(4*time.Hour).Format(time.RFC3339), now.Add(6*24*time.Hour).Format(time.RFC3339))
+	}`, now.Add(6*24*time.Hour).Format(time.RFC3339), now.Add(4*time.Hour).Format(time.RFC3339))
 
 	got, err := parseKimiUsage([]byte(input), now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 2 || got[0].Window != "5-hour" || got[0].RemainingPercentage != 75 || got[0].WindowDuration != 5 || got[0].WindowUnit != "hour" {
-		t.Fatalf("summary = %#v", got)
+		t.Fatalf("5-hour quota = %#v", got)
 	}
 	if got[1].Window != "Weekly" || got[1].RemainingPercentage != 75 || got[1].Used != 1 || got[1].Limit != 4 {
-		t.Fatalf("limit = %#v", got[1])
+		t.Fatalf("weekly quota = %#v", got[1])
+	}
+}
+
+func TestOrderKimiQuotasPutsFiveHourFirst(t *testing.T) {
+	quotas := []kimiCachedQuota{{Window: "Weekly"}, {Window: "Monthly"}, {Window: "5-hour"}}
+	orderKimiQuotas(quotas)
+	if got := []string{quotas[0].Window, quotas[1].Window, quotas[2].Window}; !reflect.DeepEqual(got, []string{"5-hour", "Weekly", "Monthly"}) {
+		t.Fatalf("ordered windows = %v", got)
+	}
+}
+
+func TestKimiPercentageDoesNotOverflowForLargeLimits(t *testing.T) {
+	now := time.Now()
+	input := fmt.Sprintf(`{"code":0,"data":{"kind":"ok","summary":{"window":{"duration":5,"unit":"hour"},"used":0,"limit":1e308,"reset_at":%q}}}`, now.Add(time.Hour).Format(time.RFC3339))
+	quotas, err := parseKimiUsage([]byte(input), now)
+	if err != nil || len(quotas) != 1 || quotas[0].RemainingPercentage != 100 {
+		t.Fatalf("large quota = %#v, %v", quotas, err)
+	}
+	cache := kimiCacheFile{Version: cacheVersion, Provider: "Kimi Code", UpdatedAt: now, Quotas: quotas}
+	if err := validateKimiCache(cache, now); err != nil {
+		t.Fatalf("validate large quota: %v", err)
 	}
 }
 

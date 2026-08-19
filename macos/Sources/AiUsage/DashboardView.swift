@@ -44,11 +44,11 @@ struct DashboardView: View {
     private var scrollHeight: CGFloat {
         if selectedID != nil { return 330 }
         let groupCount = store.groups.count
-        guard groupCount > 0 else { return 144 }
-        let rowCount = store.groups.reduce(0) { $0 + $1.quotas.count }
         let hasSnapshotBanner = store.snapshot.map { $0.state != "ready" && !$0.message.isEmpty } ?? false
         let bannerCount = (store.transportError == nil ? 0 : 1) + (hasSnapshotBanner ? 1 : 0)
-        return min(300, CGFloat(groupCount * 29 + rowCount * 31 + max(0, groupCount - 1) * 12 + bannerCount * 70))
+        guard groupCount > 0 else { return min(300, CGFloat(144 + bannerCount * 70)) }
+        let rowCount = store.groups.reduce(0) { $0 + $1.quotas.count }
+        return min(300, CGFloat(groupCount * 34 + rowCount * 31 + max(0, groupCount - 1) * 12 + bannerCount * 70))
     }
 
     @ViewBuilder private var pageContent: some View {
@@ -70,7 +70,7 @@ struct DashboardView: View {
                     .font(.headline)
                 Spacer(minLength: 8)
                 Button("Quit") { NSApp.terminate(nil) }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(HeaderButtonStyle())
                     .focused($focusedControl, equals: .quit)
                     .keyboardShortcut("q", modifiers: .command)
                     .help("Quit AI Usage")
@@ -85,7 +85,7 @@ struct DashboardView: View {
                     }
                     .frame(width: 16, height: 16)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(HeaderButtonStyle())
                 .keyboardShortcut("r", modifiers: .command)
                 .help("Refresh all providers")
                 .accessibilityLabel(store.isRefreshing ? "Refreshing usage" : "Refresh usage")
@@ -171,7 +171,7 @@ struct DashboardView: View {
             }
             .padding(.horizontal, 14)
             .padding(.top, 6)
-            .padding(.bottom, 3)
+            .padding(.bottom, 8)
             .accessibilityElement(children: .combine)
 
             ForEach(group.quotas) { quota in
@@ -197,6 +197,7 @@ struct DashboardView: View {
                     Text(quota.window)
                         .font(.subheadline)
                         .lineLimit(1)
+                        .padding(.leading, 10)
                         .frame(width: 100, alignment: .leading)
                     QuotaBar(value: quota.remainingPercent, tint: state.color)
                         .frame(width: 120)
@@ -214,7 +215,9 @@ struct DashboardView: View {
                 }
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {
-                        Text(quota.window).font(.subheadline)
+                        Text(quota.window)
+                            .font(.subheadline)
+                            .padding(.leading, 10)
                         Spacer()
                         Text("\(compactPercent(quota.remainingPercent))% left")
                             .font(.caption.weight(.semibold))
@@ -357,6 +360,23 @@ struct DashboardView: View {
     }
 }
 
+private struct HeaderButtonStyle: ButtonStyle {
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.horizontal, 6)
+            .frame(height: 24)
+            .background {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.primary.opacity(configuration.isPressed ? 0.16 : isHovered ? 0.08 : 0))
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .onHover { isHovered = $0 }
+            .animation(.easeOut(duration: 0.08), value: isHovered)
+    }
+}
+
 private struct ProviderIcon: View {
     let provider: String
 
@@ -390,13 +410,14 @@ private struct QuotaBar: View {
     let tint: Color
 
     var body: some View {
+        let normalizedValue = normalizedPercent(value)
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
                     .fill(Color.primary.opacity(0.16))
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
                     .fill(tint)
-                    .frame(width: proxy.size.width * min(max(value, 0), 100) / 100)
+                    .frame(width: proxy.size.width * min(max(normalizedValue, 0), 100) / 100)
             }
         }
         .frame(height: 14)
@@ -457,7 +478,8 @@ private extension Color {
     static let usageRed = Color(red: 203 / 255, green: 65 / 255, blue: 72 / 255)
 }
 
-private func semanticState(_ remaining: Double) -> (label: String, color: Color) {
+private func semanticState(_ value: Double) -> (label: String, color: Color) {
+    let remaining = normalizedPercent(value)
     if remaining <= 0 { return ("Exhausted", .usageRed) }
     if remaining <= 25 { return ("Low", .usageOrange) }
     return ("Healthy", .usageGreen)
@@ -467,8 +489,12 @@ func quotaNeedsAttention(_ quota: DashboardQuota) -> Bool {
     quota.stale || !quota.failure.isEmpty
 }
 
+private func normalizedPercent(_ value: Double) -> Double {
+    (value * 100).rounded() / 100
+}
+
 private func compactPercent(_ value: Double) -> String {
-    value.formatted(.number.precision(.fractionLength(0...2)))
+    normalizedPercent(value).formatted(.number.precision(.fractionLength(0...2)))
 }
 
 private func resetText(_ timestamp: Int64?) -> String {
