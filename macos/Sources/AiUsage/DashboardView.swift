@@ -70,7 +70,9 @@ struct DashboardView: View {
         let rowCount = store.groups.reduce(0) { $0 + $1.quotas.count }
         let snapshotBanner = store.snapshot.map { $0.state != "ready" && !$0.message.isEmpty } ?? false
         let bannerCount = (store.transportError == nil ? 0 : 1) + (snapshotBanner ? 1 : 0)
-        return CGFloat(groupCount * 34 + rowCount * 31 + max(0, groupCount - 1) * 12 + bannerCount * 70 + 16)
+        let groupHeight = groupCount * 34 + max(0, groupCount - 1) * 12
+        let contentHeight = groupHeight + rowCount * 31 + bannerCount * 70 + 16
+        return CGFloat(contentHeight)
     }
 
     private var header: some View {
