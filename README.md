@@ -2,6 +2,13 @@
 
 A small terminal and native macOS dashboard for remaining AI quotas.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/images/macos-dashboard.png" width="48%" alt="AI Usage macOS menu-bar dashboard">
+  <img src="docs/images/terminal-dashboard.png" width="48%" alt="AI Usage terminal dashboard">
+</p>
+
 ## Platforms
 
 | Platform | CLI | Live collectors | Native app |
