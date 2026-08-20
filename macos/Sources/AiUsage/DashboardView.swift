@@ -20,13 +20,7 @@ struct DashboardView: View {
         VStack(spacing: 0) {
             header
             Color.clear.frame(height: 8)
-            ScrollView {
-                pageContent
-                    .frame(maxWidth: .infinity)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .id(selectedID ?? "dashboard")
-            .frame(height: scrollHeight)
+            page
         }
         .frame(width: Self.preferredWidth)
         .fixedSize(horizontal: false, vertical: true)
@@ -41,14 +35,26 @@ struct DashboardView: View {
         }
     }
 
-    private var scrollHeight: CGFloat {
-        if selectedID != nil { return 330 }
-        let groupCount = store.groups.count
-        let hasSnapshotBanner = store.snapshot.map { $0.state != "ready" && !$0.message.isEmpty } ?? false
-        let bannerCount = (store.transportError == nil ? 0 : 1) + (hasSnapshotBanner ? 1 : 0)
-        guard groupCount > 0 else { return min(300, CGFloat(144 + bannerCount * 70)) }
-        let rowCount = store.groups.reduce(0) { $0 + $1.quotas.count }
-        return min(300, CGFloat(groupCount * 34 + rowCount * 31 + max(0, groupCount - 1) * 12 + bannerCount * 70))
+    @ViewBuilder private var page: some View {
+        let visibleScreenHeight = NSScreen.screens.map(\.visibleFrame.height).min() ?? 700
+        let maximumHeight = dashboardMaximumPageHeight(visibleScreenHeight: visibleScreenHeight)
+        if selectedID != nil {
+            ScrollView { paddedPageContent }
+                .id(selectedID)
+                .frame(height: min(330, maximumHeight))
+        } else if estimatedDashboardHeight > maximumHeight {
+            ScrollView { paddedPageContent }
+                .frame(height: maximumHeight)
+        } else {
+            paddedPageContent
+        }
+    }
+
+    private var paddedPageContent: some View {
+        pageContent
+            .frame(maxWidth: .infinity)
+            .padding(.bottom, 16)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder private var pageContent: some View {
@@ -57,6 +63,14 @@ struct DashboardView: View {
         } else {
             dashboard
         }
+    }
+
+    private var estimatedDashboardHeight: CGFloat {
+        let groupCount = store.groups.count
+        let rowCount = store.groups.reduce(0) { $0 + $1.quotas.count }
+        let snapshotBanner = store.snapshot.map { $0.state != "ready" && !$0.message.isEmpty } ?? false
+        let bannerCount = (store.transportError == nil ? 0 : 1) + (snapshotBanner ? 1 : 0)
+        return CGFloat(groupCount * 34 + rowCount * 31 + max(0, groupCount - 1) * 12 + bannerCount * 70 + 16)
     }
 
     private var header: some View {
@@ -390,7 +404,7 @@ private struct ProviderIcon: View {
                let url = Bundle.main.url(forResource: resource, withExtension: "svg", subdirectory: "ProviderIcons"),
                let image = NSImage(contentsOf: url) {
                 Image(nsImage: image)
-                    .renderingMode(resource == "openai" ? .template : .original)
+                    .renderingMode(resource == "openai" || resource == "zai" ? .template : .original)
                     .resizable()
                     .scaledToFit()
                     .foregroundStyle(.primary)
@@ -454,11 +468,16 @@ private struct SizeReader: View {
     }
 }
 
+func dashboardMaximumPageHeight(visibleScreenHeight: CGFloat) -> CGFloat {
+    max(100, visibleScreenHeight - 96)
+}
+
 private func providerIconResource(_ provider: String) -> String? {
     switch provider.lowercased() {
     case let name where name.contains("claude"): return "claude"
     case let name where name.contains("openai") || name.contains("codex"): return "openai"
     case let name where name.contains("kimi"): return "kimi"
+    case let name where name.contains("z.ai") || name.contains("zhipu"): return "zai"
     default: return nil
     }
 }
@@ -468,6 +487,7 @@ private func providerSymbol(_ provider: String) -> String {
     case let name where name.contains("claude"): return "sparkles"
     case let name where name.contains("openai") || name.contains("codex"): return "chevron.left.forwardslash.chevron.right"
     case let name where name.contains("kimi"): return "moon.stars.fill"
+    case let name where name.contains("z.ai") || name.contains("zhipu"): return "circle.hexagongrid.fill"
     default: return "cpu"
     }
 }

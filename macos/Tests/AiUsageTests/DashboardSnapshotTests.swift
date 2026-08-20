@@ -55,6 +55,11 @@ final class DashboardSnapshotTests: XCTestCase {
         XCTAssertNil(preferredResetRefreshDeadline(current: nil, resetDates: [90], now: 100))
     }
 
+    func testDashboardMaximumPageHeightLeavesRoomForChrome() {
+        XCTAssertEqual(dashboardMaximumPageHeight(visibleScreenHeight: 800), 704)
+        XCTAssertEqual(dashboardMaximumPageHeight(visibleScreenHeight: 180), 100)
+    }
+
     func testQuotaAttentionIncludesStaleAndFailedValues() {
         func quota(stale: Bool = false, failure: String = "") -> DashboardQuota {
             DashboardQuota(

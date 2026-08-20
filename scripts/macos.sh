@@ -98,7 +98,7 @@ validate_app_bundle() {
     [ -x "$BUNDLE/Contents/MacOS/AiUsage" ] || fail "packaged app host is missing"
     [ -s "$BUNDLE/Contents/Resources/AppIcon.icns" ] || fail "packaged app icon is missing"
     [ -x "$BUNDLE/Contents/MacOS/aiusage-cli" ] || fail "packaged aiusage is missing"
-    for PROVIDER_ICON in claude openai kimi; do
+    for PROVIDER_ICON in claude openai kimi zai; do
         [ -s "$BUNDLE/Contents/Resources/ProviderIcons/$PROVIDER_ICON.svg" ] || fail "packaged $PROVIDER_ICON icon is missing"
     done
     [ "$(lipo -archs "$BUNDLE/Contents/MacOS/AiUsage")" = arm64 ] || fail "packaged app host is not arm64-only"
@@ -138,7 +138,7 @@ fi
 [ -s "$MACOS/Resources/AppIcon.icns" ] || fail "missing app icon"
 [ -f "$ROOT/LICENSE" ] || fail "missing project LICENSE"
 [ -f "$MACOS/Resources/Licenses/lobe-icons-LICENSE.txt" ] || fail "missing Lobe Icons license"
-for PROVIDER_ICON in claude openai kimi; do
+for PROVIDER_ICON in claude openai kimi zai; do
     [ -s "$MACOS/Resources/ProviderIcons/$PROVIDER_ICON.svg" ] || fail "missing $PROVIDER_ICON provider icon"
 done
 plutil -lint "$MACOS/Info.plist" >/dev/null || fail "macos/Info.plist is malformed"

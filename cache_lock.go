@@ -6,6 +6,7 @@ var (
 	claudeCacheLockTimeout = 2 * time.Second
 	codexCacheLockTimeout  = 2 * time.Second
 	kimiCacheLockTimeout   = 2 * time.Second
+	zaiCacheLockTimeout    = 2 * time.Second
 )
 
 func lockClaudeCache() (func(), error) {
@@ -18,4 +19,8 @@ func lockCodexCache() (func(), error) {
 
 func lockKimiCache() (func(), error) {
 	return lockProviderCache(".kimi.lock", "Kimi", kimiCacheLockTimeout)
+}
+
+func lockZAICache() (func(), error) {
+	return lockProviderCache(".zai.lock", "Z.AI", zaiCacheLockTimeout)
 }

@@ -958,8 +958,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
 
     private func resizePanel(to size: CGSize) {
         guard size.height > 0 else { return }
-        // Refresh swaps data and controls in one render pass; keep an open panel's geometry stable.
-        if panel.isVisible, store?.isRefreshing == true { return }
         let screen = statusItem.button?.window?.screen ?? NSScreen.main
         let maxHeight = max(220, (screen?.visibleFrame.height ?? 700) - 32)
         let contentSize = NSSize(width: DashboardView.preferredWidth, height: min(ceil(size.height), maxHeight))

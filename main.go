@@ -121,12 +121,14 @@ type dashboardCollectors struct {
 	claude func(context.Context) error
 	codex  func(context.Context) error
 	kimi   func(context.Context) error
+	zai    func(context.Context) error
 }
 
 var liveDashboardCollectors = dashboardCollectors{
 	claude: func(ctx context.Context) error { _, err := collectClaude(ctx); return err },
 	codex:  func(ctx context.Context) error { _, err := collectCodex(ctx); return err },
 	kimi:   func(ctx context.Context) error { _, err := collectKimi(ctx); return err },
+	zai:    func(ctx context.Context) error { _, err := collectZAI(ctx); return err },
 }
 
 // tickMsg triggers countdown rerenders and cache reloads while the TUI is open.
@@ -141,6 +143,7 @@ type resetRefreshMsg struct {
 type claudeCollectedMsg struct{ err error }
 type codexCollectedMsg struct{ err error }
 type kimiCollectedMsg struct{ err error }
+type zaiCollectedMsg struct{ err error }
 
 type collectorRuntime struct {
 	ctx    context.Context
@@ -159,12 +162,15 @@ type model struct {
 	claudeCollecting      bool
 	codexCollecting       bool
 	kimiCollecting        bool
+	zaiCollecting         bool
 	claudeError           string
 	codexError            string
 	kimiError             string
+	zaiError              string
 	claudeErrorAt         time.Time
 	codexErrorAt          time.Time
 	kimiErrorAt           time.Time
+	zaiErrorAt            time.Time
 	resetRefreshScheduled map[string]time.Time
 	resetRefreshPending   map[string]time.Time
 	resetRefreshFired     map[string]struct{}
@@ -177,7 +183,7 @@ type model struct {
 func main() {
 	command, ok := parseCommand(os.Args[1:])
 	if !ok {
-		fmt.Fprintf(os.Stderr, "usage: %s [--demo|--claude-oauth|ingest-claude-code|collect-claude|collect-codex|collect-kimi|dashboard-json [--refresh=auto|--refresh=force]]\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(os.Stderr, "usage: %s [--demo|--claude-oauth|ingest-claude-code|collect-claude|collect-codex|collect-kimi|collect-zai|dashboard-json [--refresh=auto|--refresh=force]]\n", filepath.Base(os.Args[0]))
 		os.Exit(2)
 	}
 	switch command {
@@ -213,6 +219,13 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println(compactKimiUsage(cache))
+	case "collect-zai":
+		cache, err := collectZAI(context.Background())
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "aiusage:", err)
+			os.Exit(1)
+		}
+		fmt.Println(compactZAIUsage(cache))
 	case "dashboard-json", "dashboard-json --refresh=auto", "dashboard-json --refresh=force":
 		if err := isolateDashboardHelper(); err != nil {
 			fmt.Fprintln(os.Stderr, "aiusage:", err)
@@ -244,7 +257,7 @@ func parseCommand(args []string) (string, bool) {
 		return "", false
 	}
 	switch args[0] {
-	case "--demo", "--claude-oauth", "ingest-claude-code", "collect-claude", "collect-codex", "collect-kimi", "dashboard-json":
+	case "--demo", "--claude-oauth", "ingest-claude-code", "collect-claude", "collect-codex", "collect-kimi", "collect-zai", "dashboard-json":
 		return args[0], true
 	default:
 		return "", false
@@ -260,7 +273,7 @@ func writeDashboardJSON(ctx context.Context, refresh string, output io.Writer, c
 			provider string
 			err      error
 		}
-		results := make(chan result, 3)
+		results := make(chan result, 4)
 		var active sync.WaitGroup
 		start := func(provider string, selected bool, collect func(context.Context) error) {
 			if !selected {
@@ -275,6 +288,7 @@ func writeDashboardJSON(ctx context.Context, refresh string, output io.Writer, c
 		start("Claude", selected[0], collectors.claude)
 		start("OpenAI", selected[1], collectors.codex)
 		start("Kimi", selected[2], collectors.kimi)
+		start("Z.AI", selected[3], collectors.zai)
 		active.Wait()
 		close(results)
 		attemptedAt := now()
@@ -287,6 +301,8 @@ func writeDashboardJSON(ctx context.Context, refresh string, output io.Writer, c
 				m.codexError, m.codexErrorAt = failure, errorAttempt(failure, attemptedAt)
 			case "Kimi":
 				m.kimiError, m.kimiErrorAt = failure, errorAttempt(failure, attemptedAt)
+			case "Z.AI":
+				m.zaiError, m.zaiErrorAt = failure, errorAttempt(failure, attemptedAt)
 			}
 		}
 		if err := ctx.Err(); err != nil {
@@ -298,12 +314,12 @@ func writeDashboardJSON(ctx context.Context, refresh string, output io.Writer, c
 	return json.NewEncoder(output).Encode(newDashboardSnapshot(m, generatedAt))
 }
 
-func dashboardRefreshProviders(refresh string, now time.Time, quotas []quota) [3]bool {
+func dashboardRefreshProviders(refresh string, now time.Time, quotas []quota) [4]bool {
 	if refresh == "force" {
-		return [3]bool{true, true, true}
+		return [4]bool{true, true, true, true}
 	}
-	claudeFresh, codexFresh, kimiFresh := freshProviderCaches(now)
-	selected := [3]bool{!claudeFresh, !codexFresh, !kimiFresh}
+	claudeFresh, codexFresh, kimiFresh, zaiFresh := freshProviderCaches(now)
+	selected := [4]bool{!claudeFresh, !codexFresh, !kimiFresh, !zaiFresh}
 	latestAttempts := make(map[string]time.Time)
 	for _, quota := range quotas {
 		if quota.AttemptedAt.After(latestAttempts[quota.Provider]) {
@@ -325,6 +341,8 @@ func dashboardRefreshProviders(refresh string, now time.Time, quotas []quota) [3
 			selected[1] = true
 		case "Kimi":
 			selected[2] = true
+		case "Z.AI":
+			selected[3] = true
 		}
 	}
 	return selected
@@ -434,11 +452,12 @@ func (r *collectorRuntime) stop() {
 }
 
 func newDashboardModel() model {
-	claudeFresh, codexFresh, kimiFresh := freshProviderCaches(time.Now())
+	claudeFresh, codexFresh, kimiFresh, zaiFresh := freshProviderCaches(time.Now())
 	return model{
 		claudeCollecting: !claudeFresh,
 		codexCollecting:  !codexFresh,
 		kimiCollecting:   !kimiFresh,
+		zaiCollecting:    !zaiFresh,
 		collectors:       newCollectorRuntime(),
 	}
 }
@@ -798,6 +817,13 @@ func collectKimiCmd(runtime *collectorRuntime) tea.Cmd {
 	})
 }
 
+func collectZAICmd(runtime *collectorRuntime) tea.Cmd {
+	return runtime.command(func(ctx context.Context) tea.Msg {
+		_, err := collectZAI(ctx)
+		return zaiCollectedMsg{err: err}
+	})
+}
+
 func (m model) Init() tea.Cmd {
 	if m.demo {
 		return tick()
@@ -814,6 +840,9 @@ func (m model) Init() tea.Cmd {
 	}
 	if m.kimiCollecting {
 		commands = append(commands, collectKimiCmd(m.collectors))
+	}
+	if m.zaiCollecting {
+		commands = append(commands, collectZAICmd(m.collectors))
 	}
 	commands = append(commands, func() tea.Msg { return scheduleResetRefreshMsg{} })
 	return tea.Batch(commands...)
@@ -879,6 +908,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		commands := []tea.Cmd{m.startPendingResetRefresh("Kimi")}
 		commands = append(commands, m.resetRefreshCmds(time.Now())...)
 		return m, tea.Batch(commands...)
+	case zaiCollectedMsg:
+		m.zaiCollecting = false
+		m.zaiError = safeCollectionError(msg.err)
+		m.zaiErrorAt = errorTime(m.zaiError)
+		m.reload()
+		commands := []tea.Cmd{m.startPendingResetRefresh("Z.AI")}
+		commands = append(commands, m.resetRefreshCmds(time.Now())...)
+		return m, tea.Batch(commands...)
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -916,9 +953,9 @@ func (m *model) startCollectors(force bool) []tea.Cmd {
 	if m.collectors == nil {
 		m.collectors = newCollectorRuntime()
 	}
-	claudeFresh, codexFresh, kimiFresh := false, false, false
+	claudeFresh, codexFresh, kimiFresh, zaiFresh := false, false, false, false
 	if !force {
-		claudeFresh, codexFresh, kimiFresh = freshProviderCaches(time.Now())
+		claudeFresh, codexFresh, kimiFresh, zaiFresh = freshProviderCaches(time.Now())
 	}
 	var commands []tea.Cmd
 	if !claudeFresh {
@@ -933,6 +970,11 @@ func (m *model) startCollectors(force bool) []tea.Cmd {
 	}
 	if !kimiFresh {
 		if command := m.startProviderCollector("Kimi"); command != nil {
+			commands = append(commands, command)
+		}
+	}
+	if !zaiFresh {
+		if command := m.startProviderCollector("Z.AI"); command != nil {
 			commands = append(commands, command)
 		}
 	}
@@ -959,6 +1001,11 @@ func (m *model) startProviderCollector(provider string) tea.Cmd {
 			m.kimiCollecting = true
 			return collectKimiCmd(m.collectors)
 		}
+	case "Z.AI":
+		if !m.zaiCollecting {
+			m.zaiCollecting = true
+			return collectZAICmd(m.collectors)
+		}
 	}
 	return nil
 }
@@ -971,6 +1018,8 @@ func (m model) providerCollecting(provider string) bool {
 		return m.codexCollecting
 	case "Kimi":
 		return m.kimiCollecting
+	case "Z.AI":
+		return m.zaiCollecting
 	default:
 		return false
 	}
@@ -1060,7 +1109,7 @@ func (m *model) resetRefreshCmds(now time.Time) []tea.Cmd {
 	return commands
 }
 
-func freshProviderCaches(now time.Time) (claude, codex, kimi bool) {
+func freshProviderCaches(now time.Time) (claude, codex, kimi, zai bool) {
 	if cache, err := readCache(); err == nil {
 		attemptedAt := cache.OAuthAttemptedAt
 		if attemptedAt.IsZero() {
@@ -1077,6 +1126,9 @@ func freshProviderCaches(now time.Time) (claude, codex, kimi bool) {
 	}
 	if cache, err := readKimiCache(); err == nil {
 		kimi = providerCacheFresh(cache.AttemptedAt, cache.UpdatedAt, now)
+	}
+	if cache, err := readZAICache(); err == nil {
+		zai = providerCacheFresh(cache.AttemptedAt, cache.UpdatedAt, now)
 	}
 	return
 }
@@ -1115,7 +1167,7 @@ func safeCollectionError(err error) string {
 }
 
 func (m model) collecting() bool {
-	return m.claudeCollecting || m.codexCollecting || m.kimiCollecting
+	return m.claudeCollecting || m.codexCollecting || m.kimiCollecting || m.zaiCollecting
 }
 
 func errorTime(text string) time.Time {
@@ -1677,7 +1729,31 @@ func (m *model) reloadAt(now time.Time) {
 		}
 	}
 
-	details := m.unavailableProviderDetails(claudeCache, claudeErr, codexCache, codexErr, kimiCache, kimiErr)
+	zaiCache, zaiErr := readZAICache()
+	if zaiErr == nil && cacheStateNewerThan(m.zaiErrorAt, zaiCache.AttemptedAt, zaiCache.UpdatedAt) {
+		m.zaiError, m.zaiErrorAt = "", time.Time{}
+	}
+	zaiFailure := currentFailure(zaiCache.Failure, m.zaiError)
+	if zaiErr == nil {
+		detail := "Plan level: " + zaiCache.PlanLevel
+		for _, q := range zaiCache.Quotas {
+			m.quotas = append(m.quotas, quota{
+				Provider:    "Z.AI",
+				Product:     "Coding Plan",
+				Window:      q.Window,
+				Remaining:   q.RemainingPercentage,
+				ResetAt:     q.ResetsAt,
+				UpdatedAt:   zaiCache.UpdatedAt,
+				AttemptedAt: currentAttempt(zaiCache.AttemptedAt, m.zaiError, m.zaiErrorAt),
+				Failure:     zaiFailure,
+				Source:      "Z.AI quota API via Pi (experimental)",
+				Detail:      detail,
+				Stale:       zaiFailure != "" || quotaIsStale(zaiCache.UpdatedAt, q.ResetsAt, now),
+			})
+		}
+	}
+
+	details := m.unavailableProviderDetails(claudeCache, claudeErr, codexCache, codexErr, kimiCache, kimiErr, zaiCache, zaiErr)
 	if len(m.quotas) == 0 {
 		m.selected = 0
 		m.detail = false
@@ -1722,7 +1798,7 @@ func currentAttempt(cached time.Time, transient string, transientAt time.Time) t
 	return cached
 }
 
-func (m model) unavailableProviderDetails(claude cacheFile, claudeErr error, codex codexCacheFile, codexErr error, kimi kimiCacheFile, kimiErr error) []string {
+func (m model) unavailableProviderDetails(claude cacheFile, claudeErr error, codex codexCacheFile, codexErr error, kimi kimiCacheFile, kimiErr error, zai zaiCacheFile, zaiErr error) []string {
 	var details []string
 	if len(claude.Quotas) == 0 {
 		if m.claudeError != "" {
@@ -1757,6 +1833,17 @@ func (m model) unavailableProviderDetails(claude cacheFile, claudeErr error, cod
 			details = append(details, "Kimi: install Kimi Code and sign in; collection is experimental")
 		}
 	}
+	if len(zai.Quotas) == 0 {
+		if m.zaiError != "" {
+			details = append(details, "Z.AI: "+m.zaiError)
+		} else if zaiErr == nil && zai.Failure != "" {
+			details = append(details, "Z.AI: "+zai.Failure)
+		} else if zaiErr != nil && !errors.Is(zaiErr, os.ErrNotExist) {
+			details = append(details, "Z.AI cache: "+safeCollectionError(zaiErr))
+		} else if !m.zaiCollecting {
+			details = append(details, "Z.AI: install Pi and run /login zai-coding-cn; collection is experimental")
+		}
+	}
 	return details
 }
 
@@ -1773,5 +1860,7 @@ func newDemoModel() model {
 		{Provider: "Claude", Product: "Max", Window: "Weekly · all", Remaining: 63, ResetAt: &inThreeDays, UpdatedAt: now, Source: "demo fixture", Detail: "Demo values only; no account was accessed."},
 		{Provider: "Kimi", Product: "Code", Window: "5-hour", Remaining: 72, ResetAt: &inTwoHours, UpdatedAt: now.Add(-time.Minute), Source: "demo fixture", Detail: "Demo values only; live Kimi collection is available in normal mode."},
 		{Provider: "Kimi", Product: "Code", Window: "Weekly", Remaining: 41, ResetAt: &inThreeDays, UpdatedAt: now.Add(-time.Minute), Source: "demo fixture", Detail: "Demo values only; live Kimi collection is available in normal mode."},
+		{Provider: "Z.AI", Product: "Coding Plan", Window: "5-hour", Remaining: 88, ResetAt: &inTwoHours, UpdatedAt: now.Add(-time.Minute), Source: "demo fixture", Detail: "Demo values only; live Z.AI collection is available in normal mode."},
+		{Provider: "Z.AI", Product: "Coding Plan", Window: "Weekly", Remaining: 91, ResetAt: &inThreeDays, UpdatedAt: now.Add(-time.Minute), Source: "demo fixture", Detail: "Demo values only; live Z.AI collection is available in normal mode."},
 	}}
 }

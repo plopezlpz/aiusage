@@ -26,7 +26,7 @@ func setTestCacheHome(t *testing.T, dir string) {
 
 func TestParseCommandRejectsUnknownAndTrailingArguments(t *testing.T) {
 	valid := [][]string{
-		nil, {"--demo"}, {"--claude-oauth"}, {"ingest-claude-code"}, {"collect-claude"}, {"collect-codex"}, {"collect-kimi"},
+		nil, {"--demo"}, {"--claude-oauth"}, {"ingest-claude-code"}, {"collect-claude"}, {"collect-codex"}, {"collect-kimi"}, {"collect-zai"},
 		{"dashboard-json"}, {"dashboard-json", "--refresh=auto"}, {"dashboard-json", "--refresh=force"},
 	}
 	for _, args := range valid {
@@ -124,7 +124,7 @@ func TestCollectorRuntimeStartStopRaceAndNilModelPath(t *testing.T) {
 
 	m := model{}
 	commands := m.startCollectors(true)
-	if m.collectors == nil || len(commands) != 3 {
+	if m.collectors == nil || len(commands) != 4 {
 		t.Fatalf("nil-runtime model did not initialize collectors safely: %#v", m)
 	}
 	m.collectors.stop()
@@ -606,7 +606,7 @@ func TestResetRefreshDefersFarTimersAndInvalidatesChangedDeadline(t *testing.T) 
 
 func TestResetRefreshStartsOnlyDueProviderAndIgnoresDuplicate(t *testing.T) {
 	deadline := time.Now().Add(time.Hour)
-	for _, provider := range []string{"Claude", "OpenAI", "Kimi"} {
+	for _, provider := range []string{"Claude", "OpenAI", "Kimi", "Z.AI"} {
 		t.Run(provider, func(t *testing.T) {
 			m := model{resetRefreshScheduled: map[string]time.Time{provider: deadline}}
 			updated, command := m.Update(resetRefreshMsg{provider: provider, deadline: deadline})
@@ -614,7 +614,7 @@ func TestResetRefreshStartsOnlyDueProviderAndIgnoresDuplicate(t *testing.T) {
 			if command == nil {
 				t.Fatal("reset refresh did not start a collector")
 			}
-			if got.claudeCollecting != (provider == "Claude") || got.codexCollecting != (provider == "OpenAI") || got.kimiCollecting != (provider == "Kimi") {
+			if got.claudeCollecting != (provider == "Claude") || got.codexCollecting != (provider == "OpenAI") || got.kimiCollecting != (provider == "Kimi") || got.zaiCollecting != (provider == "Z.AI") {
 				t.Fatalf("reset refresh started wrong provider: %#v", got)
 			}
 			if _, ok := got.resetRefreshFired[resetRefreshKey(provider, deadline)]; !ok {
@@ -680,17 +680,17 @@ func TestDefaultDashboardSchedulesAllProvidersAndRForcesThem(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	setTestCacheHome(t, t.TempDir())
 	dashboard := newDashboardModel()
-	if !dashboard.claudeCollecting || !dashboard.codexCollecting || !dashboard.kimiCollecting || dashboard.Init() == nil {
+	if !dashboard.claudeCollecting || !dashboard.codexCollecting || !dashboard.kimiCollecting || !dashboard.zaiCollecting || dashboard.Init() == nil {
 		t.Fatalf("default startup state = %#v", dashboard)
 	}
 
 	base := model{}
-	if commands := base.startCollectors(true); len(commands) != 3 {
-		t.Fatalf("forced collector command count = %d, want 3", len(commands))
+	if commands := base.startCollectors(true); len(commands) != 4 {
+		t.Fatalf("forced collector command count = %d, want 4", len(commands))
 	}
 	updated, command := (model{}).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 	got := updated.(model)
-	if command == nil || !got.claudeCollecting || !got.codexCollecting || !got.kimiCollecting {
+	if command == nil || !got.claudeCollecting || !got.codexCollecting || !got.kimiCollecting || !got.zaiCollecting {
 		t.Fatalf("manual refresh did not force every provider: %#v", got)
 	}
 }
@@ -723,9 +723,16 @@ func TestStartupUsesFreshProviderCachesAndManualRefreshBypassesThem(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
+	zaiPath, _ := zaiCachePath()
+	if err := writeJSONCache(zaiPath, zaiCacheFile{
+		Version: cacheVersion, Provider: "Z.AI Coding Plan", PlanLevel: "lite", UpdatedAt: now, AttemptedAt: now,
+		Quotas: []zaiCachedQuota{{Window: "5-hour", Unit: 3, UsedPercentage: 50, RemainingPercentage: 50, ResetsAt: &reset}},
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	fresh := newDashboardModel()
-	if fresh.claudeCollecting || fresh.codexCollecting || fresh.kimiCollecting {
+	if fresh.claudeCollecting || fresh.codexCollecting || fresh.kimiCollecting || fresh.zaiCollecting {
 		t.Fatalf("fresh caches scheduled collection: %#v", fresh)
 	}
 	if fresh.Init() == nil {
@@ -733,12 +740,12 @@ func TestStartupUsesFreshProviderCachesAndManualRefreshBypassesThem(t *testing.T
 	}
 	periodic, periodicCommand := model{}.Update(providerTickMsg(now))
 	periodicModel := periodic.(model)
-	if periodicCommand == nil || periodicModel.claudeCollecting || periodicModel.codexCollecting || periodicModel.kimiCollecting {
+	if periodicCommand == nil || periodicModel.claudeCollecting || periodicModel.codexCollecting || periodicModel.kimiCollecting || periodicModel.zaiCollecting {
 		t.Fatalf("automatic refresh did not reuse fresh caches: %#v", periodicModel)
 	}
 	updated, command := fresh.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 	forced := updated.(model)
-	if !forced.claudeCollecting || !forced.codexCollecting || !forced.kimiCollecting || command == nil {
+	if !forced.claudeCollecting || !forced.codexCollecting || !forced.kimiCollecting || !forced.zaiCollecting || command == nil {
 		t.Fatalf("manual refresh did not bypass caches: %#v", forced)
 	}
 
@@ -747,7 +754,7 @@ func TestStartupUsesFreshProviderCachesAndManualRefreshBypassesThem(t *testing.T
 		t.Fatal(err)
 	}
 	mixed := newDashboardModel()
-	if mixed.claudeCollecting || !mixed.codexCollecting || mixed.kimiCollecting {
+	if mixed.claudeCollecting || !mixed.codexCollecting || mixed.kimiCollecting || mixed.zaiCollecting {
 		t.Fatalf("provider caches were not evaluated independently: %#v", mixed)
 	}
 	if mixed.Init() == nil {
@@ -755,7 +762,7 @@ func TestStartupUsesFreshProviderCachesAndManualRefreshBypassesThem(t *testing.T
 	}
 	periodic, periodicCommand = model{}.Update(providerTickMsg(now))
 	periodicModel = periodic.(model)
-	if periodicModel.claudeCollecting || !periodicModel.codexCollecting || periodicModel.kimiCollecting || periodicCommand == nil {
+	if periodicModel.claudeCollecting || !periodicModel.codexCollecting || periodicModel.kimiCollecting || periodicModel.zaiCollecting || periodicCommand == nil {
 		t.Fatalf("automatic refresh did not evaluate provider caches independently: %#v", periodicModel)
 	}
 }
@@ -861,6 +868,13 @@ func writeSnapshotCaches(t *testing.T, now, reset time.Time) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	zaiPath, _ := zaiCachePath()
+	if err := writeJSONCache(zaiPath, zaiCacheFile{
+		Version: cacheVersion, Provider: "Z.AI Coding Plan", PlanLevel: "lite", UpdatedAt: updatedAt, AttemptedAt: attemptedAt,
+		Quotas: []zaiCachedQuota{{Window: "5-hour", Unit: 3, UsedPercentage: 12, RemainingPercentage: 88, ResetsAt: &reset}},
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestDashboardJSONSnapshotV1(t *testing.T) {
@@ -888,7 +902,7 @@ func TestDashboardJSONSnapshotV1(t *testing.T) {
 	if raw.Version != 1 || raw.GeneratedAt != now.Unix() || raw.State != "ready" || raw.Message != "" {
 		t.Fatalf("snapshot header = %#v", raw)
 	}
-	wantProviders := []string{"Claude", "Claude", "OpenAI", "Kimi"}
+	wantProviders := []string{"Claude", "Claude", "OpenAI", "Kimi", "Z.AI"}
 	if len(raw.Quotas) != len(wantProviders) {
 		t.Fatalf("quota count = %d, want %d", len(raw.Quotas), len(wantProviders))
 	}
@@ -905,6 +919,10 @@ func TestDashboardJSONSnapshotV1(t *testing.T) {
 	}
 	if raw.Quotas[0].Source == "" || raw.Quotas[0].Detail == "" || raw.Quotas[0].Failure != "" || raw.Quotas[0].Stale {
 		t.Fatalf("Claude shape = %#v", raw.Quotas[0])
+	}
+	zai := raw.Quotas[len(raw.Quotas)-1]
+	if zai.Provider != "Z.AI" || zai.Product != "Coding Plan" || zai.Window != "5-hour" || zai.RemainingPercent != 88 || zai.Source == "" || zai.Detail != "Plan level: lite" {
+		t.Fatalf("Z.AI shape/order = %#v", zai)
 	}
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(output.Bytes(), &object); err != nil {
@@ -929,15 +947,18 @@ func TestDashboardJSONRefreshSelectionConcurrencyAndPartialFailure(t *testing.T)
 	reset := now.Add(time.Hour)
 	writeSnapshotCaches(t, now, reset)
 
-	if selected := dashboardRefreshProviders("auto", now, nil); selected != [3]bool{} {
+	if selected := dashboardRefreshProviders("auto", now, nil); selected != [4]bool{} {
 		t.Fatalf("fresh auto selection = %v", selected)
 	}
-	if selected := dashboardRefreshProviders("force", now, nil); selected != [3]bool{true, true, true} {
+	if selected := dashboardRefreshProviders("force", now, nil); selected != [4]bool{true, true, true, true} {
 		t.Fatalf("force selection = %v", selected)
 	}
 	pastReset := now.Add(-resetRefreshDelay)
-	if selected := dashboardRefreshProviders("auto", now, []quota{{Provider: "Claude", ResetAt: &pastReset}}); selected != [3]bool{true, false, false} {
+	if selected := dashboardRefreshProviders("auto", now, []quota{{Provider: "Claude", ResetAt: &pastReset}}); selected != [4]bool{true, false, false, false} {
 		t.Fatalf("reset override selection = %v", selected)
+	}
+	if selected := dashboardRefreshProviders("auto", now, []quota{{Provider: "Z.AI", ResetAt: &pastReset}}); selected != [4]bool{false, false, false, true} {
+		t.Fatalf("Z.AI reset override selection = %v", selected)
 	}
 	expiredReset := now.Add(-2 * resetRefreshDelay)
 	beforeDeadline := expiredReset.Add(resetRefreshDelay - time.Second)
@@ -946,14 +967,14 @@ func TestDashboardJSONRefreshSelectionConcurrencyAndPartialFailure(t *testing.T)
 		{Provider: "Claude", ResetAt: &expiredReset, AttemptedAt: beforeDeadline, Failure: "failed"},
 		{Provider: "Claude", AttemptedAt: afterDeadline, Failure: "failed"},
 	}
-	if selected := dashboardRefreshProviders("auto", now, failedAfterReset); selected != [3]bool{} {
+	if selected := dashboardRefreshProviders("auto", now, failedAfterReset); selected != [4]bool{} {
 		t.Fatalf("fresh failed attempt after reset selected provider again: %v", selected)
 	}
-	if selected := dashboardRefreshProviders("auto", afterDeadline.Add(providerRefreshRate), failedAfterReset); selected != [3]bool{true, true, true} {
+	if selected := dashboardRefreshProviders("auto", afterDeadline.Add(providerRefreshRate), failedAfterReset); selected != [4]bool{true, true, true, true} {
 		t.Fatalf("expired attempt freshness did not restore normal retries: %v", selected)
 	}
 
-	started := make(chan string, 3)
+	started := make(chan string, 4)
 	release := make(chan struct{})
 	collector := func(provider string, err error) func(context.Context) error {
 		return func(context.Context) error {
@@ -966,13 +987,14 @@ func TestDashboardJSONRefreshSelectionConcurrencyAndPartialFailure(t *testing.T)
 		claude: collector("Claude", errors.New("temporary\nfailure")),
 		codex:  collector("OpenAI", nil),
 		kimi:   collector("Kimi", nil),
+		zai:    collector("Z.AI", nil),
 	}
 	var output bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
 		done <- writeDashboardJSON(context.Background(), "force", &output, collectors, func() time.Time { return now })
 	}()
-	for range 3 {
+	for range 4 {
 		select {
 		case <-started:
 		case <-time.After(time.Second):
@@ -992,7 +1014,7 @@ func TestDashboardJSONRefreshSelectionConcurrencyAndPartialFailure(t *testing.T)
 	if err := json.Unmarshal(output.Bytes(), &snapshot); err != nil {
 		t.Fatalf("partial failure emitted invalid JSON: %v\n%s", err, output.String())
 	}
-	if snapshot.State != "partial" || len(snapshot.Quotas) != 4 || snapshot.Quotas[0].RemainingPercent != 50 || snapshot.Quotas[0].Failure != "temporaryfailure" || !snapshot.Quotas[0].Stale || snapshot.Quotas[0].AttemptedAt == nil {
+	if snapshot.State != "partial" || len(snapshot.Quotas) != 5 || snapshot.Quotas[0].RemainingPercent != 50 || snapshot.Quotas[0].Failure != "temporaryfailure" || !snapshot.Quotas[0].Stale || snapshot.Quotas[0].AttemptedAt == nil {
 		t.Fatalf("partial failure snapshot = %#v", snapshot)
 	}
 }
