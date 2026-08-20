@@ -846,7 +846,7 @@ func writeSnapshotCaches(t *testing.T, now, reset time.Time) {
 	updatedAt := now.Add(-2 * time.Minute)
 	claudePath, _ := cachePath()
 	if err := writeJSONCache(claudePath, cacheFile{
-		Version: cacheVersion, Provider: "Claude", UpdatedAt: updatedAt, OAuthAttemptedAt: attemptedAt,
+		Version: cacheVersion, Provider: "Claude", RateLimitTier: "default_claude_max_20x", SubscriptionType: "max", UpdatedAt: updatedAt, OAuthAttemptedAt: attemptedAt,
 		Quotas: []cachedQuota{
 			{Window: "5-hour session", RemainingPercentage: 50, ResetsAt: &reset, Source: claudeOAuthSource, CollectedAt: updatedAt},
 			{Window: "Weekly · all", RemainingPercentage: 40},
@@ -874,6 +874,32 @@ func writeSnapshotCaches(t *testing.T, now, reset time.Time) {
 		Quotas: []zaiCachedQuota{{Window: "5-hour", Unit: 3, UsedPercentage: 12, RemainingPercentage: 88, ResetsAt: &reset}},
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDashboardPlanLabelsFallBackWhenUnavailable(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	setTestCacheHome(t, os.Getenv("HOME"))
+	now := time.Now()
+	claudePath, _ := cachePath()
+	if err := writeJSONCache(claudePath, cacheFile{
+		Version: cacheVersion, Provider: "Claude", UpdatedAt: now,
+		Quotas: []cachedQuota{{Window: "5-hour session", RemainingPercentage: 50}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	zaiPath, _ := zaiCachePath()
+	if err := writeJSONCache(zaiPath, zaiCacheFile{
+		Version: cacheVersion, Provider: "Z.AI Coding Plan", UpdatedAt: now,
+		Quotas: []zaiCachedQuota{{Window: "5-hour", Unit: 3, UsedPercentage: 50, RemainingPercentage: 50}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	m := model{}
+	m.reloadAt(now)
+	if len(m.quotas) != 2 || m.quotas[0].Product != "Code" || m.quotas[1].Product != "Coding Plan" || m.quotas[1].Detail != "" {
+		t.Fatalf("fallback labels = %#v", m.quotas)
 	}
 }
 
@@ -917,11 +943,11 @@ func TestDashboardJSONSnapshotV1(t *testing.T) {
 	if raw.Quotas[0].ResetAt == nil || *raw.Quotas[0].ResetAt != reset.Unix() || raw.Quotas[0].AttemptedAt == nil || raw.Quotas[1].ResetAt != nil || raw.Quotas[1].AttemptedAt != nil {
 		t.Fatalf("nullable/Unix timestamps = %#v", raw.Quotas[:2])
 	}
-	if raw.Quotas[0].Source == "" || raw.Quotas[0].Detail == "" || raw.Quotas[0].Failure != "" || raw.Quotas[0].Stale {
+	if raw.Quotas[0].Product != "Max 20×" || raw.Quotas[0].Source == "" || raw.Quotas[0].Detail == "" || raw.Quotas[0].Failure != "" || raw.Quotas[0].Stale {
 		t.Fatalf("Claude shape = %#v", raw.Quotas[0])
 	}
 	zai := raw.Quotas[len(raw.Quotas)-1]
-	if zai.Provider != "Z.AI" || zai.Product != "Coding Plan" || zai.Window != "5-hour" || zai.RemainingPercent != 88 || zai.Source == "" || zai.Detail != "Plan level: lite" {
+	if zai.Provider != "Z.AI" || zai.Product != "Lite" || zai.Window != "5-hour" || zai.RemainingPercent != 88 || zai.Source == "" || zai.Detail != "Plan level: lite" {
 		t.Fatalf("Z.AI shape/order = %#v", zai)
 	}
 	var object map[string]json.RawMessage

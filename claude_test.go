@@ -18,6 +18,29 @@ type claudeRoundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f claudeRoundTripFunc) Do(request *http.Request) (*http.Response, error) { return f(request) }
 
+func TestClaudePlanTitle(t *testing.T) {
+	tests := map[string]struct {
+		subscription string
+		tier         string
+		want         string
+	}{
+		"Max 20x": {"max", "default_claude_max_20x", "Max 20×"},
+		"Max 5x":  {"max", "default_claude_max_5x", "Max 5×"},
+		"Pro":     {"pro", "default", "Pro"},
+		"Unknown": {"custom", "custom", ""},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := claudePlanTitle(test.subscription, test.tier); got != test.want {
+				t.Fatalf("claudePlanTitle(%q, %q) = %q, want %q", test.subscription, test.tier, got, test.want)
+			}
+		})
+	}
+	if got := safeClaudeCredentialLabel("max\u202e"); got != "" {
+		t.Fatalf("accepted bidirectional credential label %q", got)
+	}
+}
+
 func TestFetchClaudeUsageUsesExactPrivateOAuthRequestAndParsesPercentages(t *testing.T) {
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	body := `{

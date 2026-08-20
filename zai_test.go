@@ -141,6 +141,19 @@ func TestParseZAIUsageRejectsMalformedKnownWindows(t *testing.T) {
 	}
 }
 
+func TestZAIPlanLabelsAreSafeAndUsedWhenAvailable(t *testing.T) {
+	if _, err := safeZAIPlan("lite\u202e"); err == nil {
+		t.Fatal("accepted bidirectional plan label")
+	}
+	quota := []zaiCachedQuota{{Window: "5-hour", RemainingPercentage: 75}}
+	if got := compactZAIUsage(zaiCacheFile{PlanLevel: "lite", Quotas: quota}); got != "Z.AI Lite 5-hour 75% left" {
+		t.Fatalf("plan output = %q", got)
+	}
+	if got := compactZAIUsage(zaiCacheFile{Quotas: quota}); got != "Z.AI Coding Plan 5-hour 75% left" {
+		t.Fatalf("fallback output = %q", got)
+	}
+}
+
 func TestValidateZAICacheRejectsNonfinitePercentage(t *testing.T) {
 	now := time.Now()
 	cache := zaiCacheFile{

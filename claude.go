@@ -280,13 +280,28 @@ func parseClaudePercentage(name string, used *float64, resetText *string, now ti
 	}, nil
 }
 
+func claudePlanTitle(subscriptionType, rateLimitTier string) string {
+	switch strings.ToLower(rateLimitTier) {
+	case "default_claude_max_5x":
+		return "Max 5×"
+	case "default_claude_max_20x":
+		return "Max 20×"
+	}
+	switch strings.ToLower(subscriptionType) {
+	case "free", "pro", "max", "team", "enterprise":
+		return planTitle(strings.ToLower(subscriptionType))
+	default:
+		return ""
+	}
+}
+
 func safeClaudeCredentialLabel(value string) string {
 	value = strings.TrimSpace(value)
 	if len(value) > 128 {
 		return ""
 	}
 	for _, char := range value {
-		if unicode.IsControl(char) {
+		if !unicode.IsPrint(char) {
 			return ""
 		}
 	}

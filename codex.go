@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 const (
@@ -416,14 +417,16 @@ func readCodexCache() (codexCacheFile, error) {
 	return cache, nil
 }
 
-func codexPlanTitle(plan string) string {
+func planTitle(plan string) string {
 	if plan == "unknown" || plan == "" {
 		return ""
 	}
 	parts := strings.Split(plan, "_")
 	for i, part := range parts {
 		if part != "" {
-			parts[i] = strings.ToUpper(part[:1]) + part[1:]
+			runes := []rune(part)
+			runes[0] = unicode.ToUpper(runes[0])
+			parts[i] = string(runes)
 		}
 	}
 	return strings.Join(parts, " ")

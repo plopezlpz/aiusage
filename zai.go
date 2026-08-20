@@ -311,7 +311,7 @@ func parseZAIReset(milliseconds *int64, now time.Time) (*time.Time, error) {
 
 func safeZAIPlan(value string) (string, error) {
 	trimmed := strings.TrimSpace(value)
-	if value != trimmed || len(trimmed) > 64 || strings.IndexFunc(trimmed, unicode.IsControl) >= 0 {
+	if value != trimmed || len(trimmed) > 64 || strings.IndexFunc(trimmed, func(char rune) bool { return !unicode.IsPrint(char) }) >= 0 {
 		return "", errors.New("Z.AI plan level is invalid")
 	}
 	return trimmed, nil
@@ -391,5 +391,9 @@ func compactZAIUsage(cache zaiCacheFile) string {
 	for _, quota := range cache.Quotas {
 		parts = append(parts, fmt.Sprintf("%s %.0f%% left", quota.Window, quota.RemainingPercentage))
 	}
-	return "Z.AI Coding Plan " + strings.Join(parts, " · ")
+	product := "Coding Plan"
+	if plan := planTitle(cache.PlanLevel); plan != "" {
+		product = plan
+	}
+	return "Z.AI " + product + " " + strings.Join(parts, " · ")
 }

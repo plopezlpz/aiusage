@@ -1625,6 +1625,10 @@ func (m *model) reloadAt(now time.Time) {
 		m.claudeError, m.claudeErrorAt = "", time.Time{}
 	}
 	if claudeErr == nil {
+		product := "Code"
+		if plan := claudePlanTitle(claudeCache.SubscriptionType, claudeCache.RateLimitTier); plan != "" {
+			product = plan
+		}
 		oauthAttemptedAt := claudeCache.OAuthAttemptedAt
 		oauthFailure := currentFailure(claudeCache.OAuthFailure, m.claudeError)
 		if oauthAttemptedAt.IsZero() && claudeCache.OAuthFailure == "" {
@@ -1663,7 +1667,7 @@ func (m *model) reloadAt(now time.Time) {
 			}
 			m.quotas = append(m.quotas, quota{
 				Provider:    "Claude",
-				Product:     "Code",
+				Product:     product,
 				Window:      q.Window,
 				Remaining:   q.RemainingPercentage,
 				ResetAt:     q.ResetsAt,
@@ -1684,7 +1688,7 @@ func (m *model) reloadAt(now time.Time) {
 	codexFailure := currentFailure(codexCache.Failure, m.codexError)
 	if codexErr == nil {
 		product := "Codex"
-		if plan := codexPlanTitle(codexCache.PlanType); plan != "" {
+		if plan := planTitle(codexCache.PlanType); plan != "" {
 			product += " " + plan
 		}
 		for _, q := range codexCache.Quotas {
@@ -1735,11 +1739,18 @@ func (m *model) reloadAt(now time.Time) {
 	}
 	zaiFailure := currentFailure(zaiCache.Failure, m.zaiError)
 	if zaiErr == nil {
-		detail := "Plan level: " + zaiCache.PlanLevel
+		product := "Coding Plan"
+		if plan := planTitle(zaiCache.PlanLevel); plan != "" {
+			product = plan
+		}
+		detail := ""
+		if zaiCache.PlanLevel != "" {
+			detail = "Plan level: " + zaiCache.PlanLevel
+		}
 		for _, q := range zaiCache.Quotas {
 			m.quotas = append(m.quotas, quota{
 				Provider:    "Z.AI",
-				Product:     "Coding Plan",
+				Product:     product,
 				Window:      q.Window,
 				Remaining:   q.RemainingPercentage,
 				ResetAt:     q.ResetsAt,
