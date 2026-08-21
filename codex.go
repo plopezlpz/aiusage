@@ -69,7 +69,7 @@ type rpcResponse struct {
 type codexCommandFactory func(context.Context) *exec.Cmd
 
 var newCodexCommand codexCommandFactory = func(ctx context.Context) *exec.Cmd {
-	return exec.CommandContext(ctx, "codex", "-s", "read-only", "-a", "untrusted", "app-server")
+	return exec.CommandContext(ctx, "codex", "-s", "read-only", "-a", "never", "app-server")
 }
 
 func codexCachePath() (string, error) {

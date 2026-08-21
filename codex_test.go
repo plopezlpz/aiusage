@@ -110,7 +110,7 @@ wait
 	assertTestProcessExited(t, pid)
 
 	cmd := newCodexCommand(context.Background())
-	want := []string{"codex", "-s", "read-only", "-a", "untrusted", "app-server"}
+	want := []string{"codex", "-s", "read-only", "-a", "never", "app-server"}
 	if !reflect.DeepEqual(cmd.Args, want) {
 		t.Fatalf("Codex command = %#v, want %#v", cmd.Args, want)
 	}
