@@ -39,13 +39,16 @@ struct DashboardSnapshot: Decodable, Equatable {
             guard quota.remainingPercent.isFinite, (0...100).contains(quota.remainingPercent) else {
                 throw DashboardDataError.invalid("Remaining percentage is outside 0–100.")
             }
+            if let elapsed = quota.elapsedPercent, !elapsed.isFinite || !(0...100).contains(elapsed) {
+                throw DashboardDataError.invalid("Elapsed percentage is outside 0–100.")
+            }
             for timestamp in [quota.updatedAt, quota.attemptedAt].compactMap({ $0 }) {
                 guard timestamp >= earliest, timestamp <= generatedAt + 300 else {
                     throw DashboardDataError.invalid("Invalid quota timestamp.")
                 }
             }
             if let reset = quota.resetAt {
-                guard reset >= earliest, reset <= generatedAt + 8 * 24 * 60 * 60 else {
+                guard reset >= earliest, reset <= generatedAt + 366 * 24 * 60 * 60 else {
                     throw DashboardDataError.invalid("Invalid quota reset timestamp.")
                 }
             }
@@ -59,6 +62,7 @@ struct DashboardQuota: Decodable, Equatable, Identifiable {
     let product: String
     let window: String
     let remainingPercent: Double
+    let elapsedPercent: Double?
     let resetAt: Int64?
     let updatedAt: Int64?
     let attemptedAt: Int64?

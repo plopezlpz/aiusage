@@ -82,6 +82,20 @@ func TestFetchClaudeUsageUsesExactPrivateOAuthRequestAndParsesPercentages(t *tes
 	}
 }
 
+func TestClaudeUsageSkipsMalformedOptionalFableLimit(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	quotas, err := parseClaudeUsage([]byte(`{
+		"five_hour":{"utilization":25,"resets_at":"2026-01-01T14:00:00Z"},
+		"limits":[
+			{"scope":{"model":{"display_name":"Fable"}},"kind":"weekly","percent":96},
+			{"scope":{"model":{"display_name":"Fable"}},"kind":"weekly","percent":20,"resets_at":"2026-01-05T12:00:00Z"}
+		]
+	}`), now)
+	if err != nil || len(quotas) != 2 || quotas[0].Window != "5-hour session" || quotas[1].RemainingPercentage != 80 {
+		t.Fatalf("valid quotas were discarded: quotas=%#v err=%v", quotas, err)
+	}
+}
+
 func TestClaudeUsageDoesNotScaleFractionsOrLeakTokenAndBody(t *testing.T) {
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	quotas, err := parseClaudeUsage([]byte(`{"five_hour":{"utilization":0.5,"resets_at":"2026-01-01T14:00:00Z"}}`), now)

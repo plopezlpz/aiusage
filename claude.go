@@ -249,7 +249,7 @@ func parseClaudeUsage(body []byte, now time.Time) ([]cachedQuota, error) {
 		}
 		quota, err := parseClaudePercentage("Weekly · Fable", limit.Percent, limit.ResetsAt, now)
 		if err != nil {
-			return nil, err
+			continue
 		}
 		quotas = append(quotas, quota)
 		break

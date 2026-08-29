@@ -207,6 +207,7 @@ struct DashboardView: View {
 
     private func quotaRow(_ quota: DashboardQuota) -> some View {
         let state = semanticState(quota.remainingPercent)
+        let elapsedAccessibility = quota.elapsedPercent.map { ", \(compactPercent($0)) percent of window elapsed" } ?? ""
         return Button { showDetail(quota.id) } label: {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
@@ -215,7 +216,7 @@ struct DashboardView: View {
                         .lineLimit(1)
                         .padding(.leading, 10)
                         .frame(width: 100, alignment: .leading)
-                    QuotaBar(value: quota.remainingPercent, tint: state.color)
+                    QuotaBar(value: quota.remainingPercent, elapsed: quota.elapsedPercent, tint: state.color)
                         .frame(width: 120)
                     Text("\(compactPercent(quota.remainingPercent))% left")
                         .font(.caption.weight(.semibold))
@@ -241,7 +242,7 @@ struct DashboardView: View {
                         quotaStatusIcon(quota)
                     }
                     HStack(spacing: 8) {
-                        QuotaBar(value: quota.remainingPercent, tint: state.color)
+                        QuotaBar(value: quota.remainingPercent, elapsed: quota.elapsedPercent, tint: state.color)
                         Text(resetText(quota.resetAt))
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -256,7 +257,7 @@ struct DashboardView: View {
         .focused($focusedControl, equals: .quota(quota.id))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(quota.provider) \(quota.product), \(quota.window)")
-        .accessibilityValue("\(compactPercent(quota.remainingPercent)) percent remaining, \(state.label), \(resetText(quota.resetAt)), \(updateText(quota))")
+        .accessibilityValue("\(compactPercent(quota.remainingPercent)) percent remaining, \(state.label)\(elapsedAccessibility), \(resetText(quota.resetAt)), \(updateText(quota))")
         .accessibilityHint("Shows quota details")
     }
 
@@ -303,7 +304,7 @@ struct DashboardView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    QuotaBar(value: quota.remainingPercent, tint: semanticState(quota.remainingPercent).color)
+                    QuotaBar(value: quota.remainingPercent, elapsed: quota.elapsedPercent, tint: semanticState(quota.remainingPercent).color)
                         .frame(height: 14)
                 }
 
@@ -422,11 +423,15 @@ private struct ProviderIcon: View {
 }
 
 private struct QuotaBar: View {
+    @Environment(\.displayScale) private var displayScale
+
     let value: Double
+    let elapsed: Double?
     let tint: Color
 
     var body: some View {
         let normalizedValue = normalizedPercent(value)
+        let markerWidth = 2 / max(displayScale, 1)
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
@@ -434,10 +439,22 @@ private struct QuotaBar: View {
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
                     .fill(tint)
                     .frame(width: proxy.size.width * min(max(normalizedValue, 0), 100) / 100)
+                if let elapsed {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.75))
+                        .frame(width: markerWidth)
+                        .blendMode(.difference)
+                        .padding(.vertical, 4 / max(displayScale, 1))
+                        .offset(x: quotaMarkerOffset(width: proxy.size.width, elapsed: elapsed, displayScale: displayScale))
+                }
             }
+            .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
         }
         .frame(height: 14)
-        .accessibilityHidden(true)
+        .accessibilityElement()
+        .accessibilityLabel("Quota window pacing")
+        .accessibilityValue(elapsed.map { "\(compactPercent($0)) percent elapsed" } ?? "")
+        .accessibilityHidden(elapsed == nil)
     }
 }
 
@@ -509,6 +526,15 @@ private func semanticState(_ value: Double) -> (label: String, color: Color) {
 
 func quotaNeedsAttention(_ quota: DashboardQuota) -> Bool {
     quota.stale || !quota.failure.isEmpty
+}
+
+func quotaMarkerOffset(width: CGFloat, elapsed: Double, displayScale: CGFloat) -> CGFloat {
+    let scale = max(displayScale, 1)
+    let markerWidth = 2 / scale
+    let remainingFraction = CGFloat((100 - min(max(elapsed, 0), 100)) / 100)
+    let rawPixelOffset = width * scale * remainingFraction - markerWidth * scale / 2
+    let maximumPixelOffset = (max(0, width - markerWidth) * scale).rounded(.down)
+    return min(max(rawPixelOffset.rounded(), 0), maximumPixelOffset) / scale
 }
 
 private func normalizedPercent(_ value: Double) -> Double {

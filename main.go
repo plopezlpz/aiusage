@@ -84,6 +84,7 @@ type quota struct {
 	Provider    string
 	Product     string
 	Window      string
+	Duration    time.Duration
 	Remaining   float64
 	ResetAt     *time.Time
 	UpdatedAt   time.Time
@@ -103,18 +104,19 @@ type dashboardSnapshot struct {
 }
 
 type dashboardSnapshotQuota struct {
-	ID               string  `json:"id"`
-	Provider         string  `json:"provider"`
-	Product          string  `json:"product"`
-	Window           string  `json:"window"`
-	RemainingPercent float64 `json:"remainingPercent"`
-	ResetAt          *int64  `json:"resetAt"`
-	UpdatedAt        *int64  `json:"updatedAt"`
-	AttemptedAt      *int64  `json:"attemptedAt"`
-	Failure          string  `json:"failure"`
-	Source           string  `json:"source"`
-	Detail           string  `json:"detail"`
-	Stale            bool    `json:"stale"`
+	ID               string   `json:"id"`
+	Provider         string   `json:"provider"`
+	Product          string   `json:"product"`
+	Window           string   `json:"window"`
+	RemainingPercent float64  `json:"remainingPercent"`
+	ElapsedPercent   *float64 `json:"elapsedPercent"`
+	ResetAt          *int64   `json:"resetAt"`
+	UpdatedAt        *int64   `json:"updatedAt"`
+	AttemptedAt      *int64   `json:"attemptedAt"`
+	Failure          string   `json:"failure"`
+	Source           string   `json:"source"`
+	Detail           string   `json:"detail"`
+	Stale            bool     `json:"stale"`
 }
 
 type dashboardCollectors struct {
@@ -394,6 +396,7 @@ func newDashboardSnapshot(m model, generatedAt time.Time) dashboardSnapshot {
 			Product:          q.Product,
 			Window:           q.Window,
 			RemainingPercent: q.Remaining,
+			ElapsedPercent:   windowElapsedPercent(q.ResetAt, q.Duration, generatedAt),
 			ResetAt:          unixTime(q.ResetAt),
 			UpdatedAt:        unixTimeValue(q.UpdatedAt),
 			AttemptedAt:      unixTimeValue(q.AttemptedAt),
@@ -1353,12 +1356,61 @@ func quotaValueStyle(remaining float64) lipgloss.Style {
 	return valueStyle
 }
 
-func renderBar(remaining float64, width int) string {
-	filled := int(math.Round(remaining / 100 * float64(width)))
-	filled = max(0, min(width, filled))
-	if filled == 0 {
-		return trackStyle.Render(strings.Repeat("▇", width))
+func claudeWindowDuration(window string) time.Duration {
+	switch window {
+	case "5-hour session":
+		return 5 * time.Hour
+	case "Weekly · all", "Weekly · Fable":
+		return 7 * 24 * time.Hour
+	default:
+		return 0
 	}
+}
+
+func kimiWindowDuration(value int64, unit string, reset time.Time) time.Duration {
+	if unit == "month" {
+		month := time.Date(reset.Year(), reset.Month()-time.Month(value), 1, reset.Hour(), reset.Minute(), reset.Second(), reset.Nanosecond(), reset.Location())
+		day := min(reset.Day(), month.AddDate(0, 1, -1).Day())
+		start := time.Date(month.Year(), month.Month(), day, reset.Hour(), reset.Minute(), reset.Second(), reset.Nanosecond(), reset.Location())
+		return reset.Sub(start)
+	}
+	switch unit {
+	case "second":
+		return time.Duration(value) * time.Second
+	case "minute":
+		return time.Duration(value) * time.Minute
+	case "hour":
+		return time.Duration(value) * time.Hour
+	case "day":
+		return time.Duration(value) * 24 * time.Hour
+	case "week":
+		return time.Duration(value) * 7 * 24 * time.Hour
+	default:
+		return 0
+	}
+}
+
+func zaiWindowDuration(unit int64) time.Duration {
+	if unit == 3 {
+		return 5 * time.Hour
+	}
+	if unit == 6 {
+		return 7 * 24 * time.Hour
+	}
+	return 0
+}
+
+func windowElapsedPercent(resetAt *time.Time, duration time.Duration, now time.Time) *float64 {
+	if resetAt == nil || duration <= 0 {
+		return nil
+	}
+	elapsed := (1 - resetAt.Sub(now).Seconds()/duration.Seconds()) * 100
+	elapsed = max(0, min(100, elapsed))
+	return &elapsed
+}
+
+func renderBar(remaining float64, width int) string {
+	filled := max(0, min(width, int(math.Round(remaining/100*float64(width)))))
 	return quotaValueStyle(remaining).Render(strings.Repeat("▇", filled)) + trackStyle.Render(strings.Repeat("▇", width-filled))
 }
 
@@ -1592,19 +1644,16 @@ func freshnessAt(t, now time.Time) string {
 	if t.IsZero() {
 		return "unknown"
 	}
-	local, today := t.Local(), now.Local()
-	date := func(v time.Time) time.Time {
-		y, m, d := v.Date()
-		return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
-	}
-	days := int(date(today).Sub(date(local)) / (24 * time.Hour))
-	switch days {
-	case 0:
-		return "today " + local.Format("15:04")
-	case 1:
-		return "yesterday " + local.Format("15:04")
+	age := max(time.Duration(0), now.Sub(t))
+	switch {
+	case age < time.Minute:
+		return "just now"
+	case age < time.Hour:
+		return fmt.Sprintf("%dm ago", int(age/time.Minute))
+	case age < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(age/time.Hour))
 	default:
-		return local.Format("2 Jan 2006 15:04")
+		return fmt.Sprintf("%dd ago", int(age/(24*time.Hour)))
 	}
 }
 
@@ -1669,6 +1718,7 @@ func (m *model) reloadAt(now time.Time) {
 				Provider:    "Claude",
 				Product:     product,
 				Window:      q.Window,
+				Duration:    claudeWindowDuration(q.Window),
 				Remaining:   q.RemainingPercentage,
 				ResetAt:     q.ResetsAt,
 				UpdatedAt:   updatedAt,
@@ -1697,6 +1747,7 @@ func (m *model) reloadAt(now time.Time) {
 				Provider:    "OpenAI",
 				Product:     product,
 				Window:      q.Window,
+				Duration:    time.Duration(q.WindowDurationMins) * time.Minute,
 				Remaining:   q.RemainingPercentage,
 				ResetAt:     &reset,
 				UpdatedAt:   codexCache.UpdatedAt,
@@ -1721,6 +1772,7 @@ func (m *model) reloadAt(now time.Time) {
 				Provider:    "Kimi",
 				Product:     "Code",
 				Window:      q.Window,
+				Duration:    kimiWindowDuration(q.WindowDuration, q.WindowUnit, reset),
 				Remaining:   q.RemainingPercentage,
 				ResetAt:     &reset,
 				UpdatedAt:   kimiCache.UpdatedAt,
@@ -1752,6 +1804,7 @@ func (m *model) reloadAt(now time.Time) {
 				Provider:    "Z.AI",
 				Product:     product,
 				Window:      q.Window,
+				Duration:    zaiWindowDuration(q.Unit),
 				Remaining:   q.RemainingPercentage,
 				ResetAt:     q.ResetsAt,
 				UpdatedAt:   zaiCache.UpdatedAt,
@@ -1867,11 +1920,11 @@ func newDemoModel() model {
 	inTwoHours := now.Add(2*time.Hour + 8*time.Minute)
 	inThreeDays := now.Add(3 * 24 * time.Hour)
 	return model{demo: true, quotas: []quota{
-		{Provider: "Claude", Product: "Max", Window: "5-hour session", Remaining: 24, ResetAt: &inTwoHours, UpdatedAt: now, Source: "demo fixture", Detail: "Demo values only; no account was accessed."},
-		{Provider: "Claude", Product: "Max", Window: "Weekly · all", Remaining: 63, ResetAt: &inThreeDays, UpdatedAt: now, Source: "demo fixture", Detail: "Demo values only; no account was accessed."},
-		{Provider: "Kimi", Product: "Code", Window: "5-hour", Remaining: 72, ResetAt: &inTwoHours, UpdatedAt: now.Add(-time.Minute), Source: "demo fixture", Detail: "Demo values only; live Kimi collection is available in normal mode."},
-		{Provider: "Kimi", Product: "Code", Window: "Weekly", Remaining: 41, ResetAt: &inThreeDays, UpdatedAt: now.Add(-time.Minute), Source: "demo fixture", Detail: "Demo values only; live Kimi collection is available in normal mode."},
-		{Provider: "Z.AI", Product: "Coding Plan", Window: "5-hour", Remaining: 88, ResetAt: &inTwoHours, UpdatedAt: now.Add(-time.Minute), Source: "demo fixture", Detail: "Demo values only; live Z.AI collection is available in normal mode."},
-		{Provider: "Z.AI", Product: "Coding Plan", Window: "Weekly", Remaining: 91, ResetAt: &inThreeDays, UpdatedAt: now.Add(-time.Minute), Source: "demo fixture", Detail: "Demo values only; live Z.AI collection is available in normal mode."},
+		{Provider: "Claude", Product: "Max", Window: "5-hour session", Duration: 5 * time.Hour, Remaining: 24, ResetAt: &inTwoHours, UpdatedAt: now, Source: "demo fixture", Detail: "Demo values only; no account was accessed."},
+		{Provider: "Claude", Product: "Max", Window: "Weekly · all", Duration: 7 * 24 * time.Hour, Remaining: 63, ResetAt: &inThreeDays, UpdatedAt: now, Source: "demo fixture", Detail: "Demo values only; no account was accessed."},
+		{Provider: "Kimi", Product: "Code", Window: "5-hour", Duration: 5 * time.Hour, Remaining: 72, ResetAt: &inTwoHours, UpdatedAt: now.Add(-time.Minute), Source: "demo fixture", Detail: "Demo values only; live Kimi collection is available in normal mode."},
+		{Provider: "Kimi", Product: "Code", Window: "Weekly", Duration: 7 * 24 * time.Hour, Remaining: 41, ResetAt: &inThreeDays, UpdatedAt: now.Add(-time.Minute), Source: "demo fixture", Detail: "Demo values only; live Kimi collection is available in normal mode."},
+		{Provider: "Z.AI", Product: "Coding Plan", Window: "5-hour", Duration: 5 * time.Hour, Remaining: 88, ResetAt: &inTwoHours, UpdatedAt: now.Add(-time.Minute), Source: "demo fixture", Detail: "Demo values only; live Z.AI collection is available in normal mode."},
+		{Provider: "Z.AI", Product: "Coding Plan", Window: "Weekly", Duration: 7 * 24 * time.Hour, Remaining: 91, ResetAt: &inThreeDays, UpdatedAt: now.Add(-time.Minute), Source: "demo fixture", Detail: "Demo values only; live Z.AI collection is available in normal mode."},
 	}}
 }

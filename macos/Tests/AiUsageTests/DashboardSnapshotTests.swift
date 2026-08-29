@@ -13,7 +13,7 @@ final class DashboardSnapshotTests: XCTestCase {
           "state": "partial",
           "message": "Kimi unavailable",
           "quotas": [
-            {"id":"Claude:5-hour session","provider":"Claude","product":"Code","window":"5-hour session","remainingPercent":82.5,"resetAt":1735696800,"updatedAt":1735689590,"attemptedAt":1735689595,"failure":"","source":"status line","detail":"","stale":false},
+            {"id":"Claude:5-hour session","provider":"Claude","product":"Code","window":"5-hour session","remainingPercent":82.5,"elapsedPercent":40,"resetAt":1735696800,"updatedAt":1735689590,"attemptedAt":1735689595,"failure":"","source":"status line","detail":"","stale":false},
             {"id":"OpenAI:Weekly","provider":"OpenAI","product":"Codex Plus","window":"Weekly","remainingPercent":20,"resetAt":1735783200,"updatedAt":1735689500,"attemptedAt":1735689550,"failure":"temporary failure","source":"app-server","detail":"Plan type: plus","stale":true},
             {"id":"Claude:Weekly","provider":"Claude","product":"Code","window":"Weekly","remainingPercent":55,"resetAt":1735783200,"updatedAt":1735689590,"attemptedAt":1735689595,"failure":"","source":"status line","detail":"","stale":false}
           ]
@@ -27,12 +27,20 @@ final class DashboardSnapshotTests: XCTestCase {
         let groups = QuotaGroup.stableGroups(snapshot.quotas)
         XCTAssertEqual(groups.map(\.provider), ["Claude", "OpenAI"])
         XCTAssertEqual(groups[0].quotas.map(\.window), ["5-hour session", "Weekly"])
+        XCTAssertEqual(groups[0].quotas[0].elapsedPercent, 40)
+        XCTAssertNil(groups[0].quotas[1].elapsedPercent)
         XCTAssertTrue(groups[1].quotas[0].stale)
 
         let duplicate = json.replacingOccurrences(of: "OpenAI:Weekly", with: "Claude:5-hour session")
         XCTAssertThrowsError(try DashboardSnapshot.decode(Data(duplicate.utf8), now: now))
         let outOfRange = json.replacingOccurrences(of: "\"remainingPercent\":20", with: "\"remainingPercent\":101")
         XCTAssertThrowsError(try DashboardSnapshot.decode(Data(outOfRange.utf8), now: now))
+        let invalidElapsed = json.replacingOccurrences(of: "\"elapsedPercent\":40", with: "\"elapsedPercent\":101")
+        XCTAssertThrowsError(try DashboardSnapshot.decode(Data(invalidElapsed.utf8), now: now))
+        let monthlyReset = json.replacingOccurrences(of: "\"resetAt\":1735696800", with: "\"resetAt\":\(generated + 30 * 24 * 60 * 60)")
+        XCTAssertNoThrow(try DashboardSnapshot.decode(Data(monthlyReset.utf8), now: now))
+        let implausibleReset = json.replacingOccurrences(of: "\"resetAt\":1735696800", with: "\"resetAt\":\(generated + 367 * 24 * 60 * 60)")
+        XCTAssertThrowsError(try DashboardSnapshot.decode(Data(implausibleReset.utf8), now: now))
         let unsupported = json.replacingOccurrences(of: "\"version\": 1", with: "\"version\": 2")
         XCTAssertThrowsError(try DashboardSnapshot.decode(Data(unsupported.utf8), now: now))
         let oldSnapshot = json.replacingOccurrences(of: "\"generatedAt\": \(generated)", with: "\"generatedAt\": \(generated - 301)")
@@ -60,11 +68,19 @@ final class DashboardSnapshotTests: XCTestCase {
         XCTAssertEqual(dashboardMaximumPageHeight(visibleScreenHeight: 180), 100)
     }
 
+    func testQuotaMarkerStartsRightMovesLeftAndSnapsToPixels() {
+        XCTAssertEqual(quotaMarkerOffset(width: 100, elapsed: 0, displayScale: 2), 99)
+        XCTAssertEqual(quotaMarkerOffset(width: 100.25, elapsed: 0, displayScale: 2), 99)
+        XCTAssertEqual(quotaMarkerOffset(width: 100, elapsed: 13, displayScale: 2), 86.5)
+        XCTAssertEqual(quotaMarkerOffset(width: 100, elapsed: 600.0 / 7, displayScale: 2), 14)
+        XCTAssertEqual(quotaMarkerOffset(width: 100, elapsed: 100, displayScale: 2), 0)
+    }
+
     func testQuotaAttentionIncludesStaleAndFailedValues() {
         func quota(stale: Bool = false, failure: String = "") -> DashboardQuota {
             DashboardQuota(
                 id: "Claude:Weekly", provider: "Claude", product: "Code", window: "Weekly",
-                remainingPercent: 50, resetAt: nil, updatedAt: nil, attemptedAt: nil,
+                remainingPercent: 50, elapsedPercent: nil, resetAt: nil, updatedAt: nil, attemptedAt: nil,
                 failure: failure, source: "status line", detail: "", stale: stale
             )
         }

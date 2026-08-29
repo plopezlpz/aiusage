@@ -283,7 +283,7 @@ func TestStatusLineIngestPreservesCollectedFableQuota(t *testing.T) {
 	if len(m.quotas) != 2 || m.quotas[0].Failure != "" || m.quotas[1].Failure != previous.OAuthFailure || !m.quotas[1].AttemptedAt.Equal(previous.OAuthAttemptedAt) {
 		t.Fatalf("OAuth error was not scoped to Fable: %#v", m.quotas)
 	}
-	if view := m.View(); !strings.Contains(view, "refresh failed today") || !strings.Contains(view, "HTTP 429") {
+	if view := m.View(); !strings.Contains(view, "refresh failed just now") || !strings.Contains(view, "HTTP 429") {
 		t.Fatalf("OAuth error time/status not rendered: %q", view)
 	}
 }
@@ -400,19 +400,24 @@ func TestPersistedFailuresMustAlreadyBeSanitized(t *testing.T) {
 	}
 }
 
-func TestFreshnessUsesLocalCalendarDates(t *testing.T) {
-	location, err := time.LoadLocation("America/New_York")
-	if err != nil {
-		t.Skip(err)
-	}
-	oldLocal := time.Local
-	time.Local = location
-	defer func() { time.Local = oldLocal }()
-
-	now := time.Date(2024, 3, 11, 0, 30, 0, 0, location)
-	previousDate := time.Date(2024, 3, 10, 0, 30, 0, 0, location)
-	if got := freshnessAt(previousDate, now); got != "yesterday 00:30" {
-		t.Fatalf("freshness = %q", got)
+func TestFreshnessMatchesTrayRelativeTime(t *testing.T) {
+	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	for name, test := range map[string]struct {
+		at   time.Time
+		want string
+	}{
+		"unknown": {want: "unknown"},
+		"future":  {at: now.Add(time.Minute), want: "just now"},
+		"seconds": {at: now.Add(-59 * time.Second), want: "just now"},
+		"minutes": {at: now.Add(-2 * time.Minute), want: "2m ago"},
+		"hours":   {at: now.Add(-2 * time.Hour), want: "2h ago"},
+		"days":    {at: now.Add(-48 * time.Hour), want: "2d ago"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := freshnessAt(test.at, now); got != test.want {
+				t.Fatalf("freshness = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 
@@ -448,6 +453,34 @@ func TestQuotaColorsUseUsageThresholds(t *testing.T) {
 		if !ok || color != test.color || style.GetReverse() != test.reverse {
 			t.Fatalf("remaining %.0f style = color %v reverse %v", test.remaining, style.GetForeground(), style.GetReverse())
 		}
+	}
+}
+
+func TestWindowElapsedPercent(t *testing.T) {
+	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	weekly := 7 * 24 * time.Hour
+	reset := now.Add(24 * time.Hour)
+	elapsed := windowElapsedPercent(&reset, weekly, now)
+	if elapsed == nil || math.Abs(*elapsed-600.0/7) > 0.0001 {
+		t.Fatalf("weekly elapsed = %v", elapsed)
+	}
+	if got := windowElapsedPercent(nil, weekly, now); got != nil {
+		t.Fatalf("unknown reset elapsed = %v", *got)
+	}
+	if got := windowElapsedPercent(&reset, 0, now); got != nil {
+		t.Fatalf("unknown duration elapsed = %v", *got)
+	}
+	beforeStart := now.Add(2 * weekly)
+	if got := windowElapsedPercent(&beforeStart, weekly, now); got == nil || *got != 0 {
+		t.Fatalf("pre-window elapsed = %v", got)
+	}
+	overdue := now.Add(-time.Minute)
+	if got := windowElapsedPercent(&overdue, weekly, now); got == nil || *got != 100 {
+		t.Fatalf("overdue elapsed = %v", got)
+	}
+	monthReset := time.Date(2030, 3, 31, 0, 0, 0, 0, time.UTC)
+	if got := kimiWindowDuration(1, "month", monthReset); got != 31*24*time.Hour {
+		t.Fatalf("calendar-month duration = %v", got)
 	}
 }
 
@@ -943,6 +976,14 @@ func TestDashboardJSONSnapshotV1(t *testing.T) {
 	if raw.Quotas[0].ResetAt == nil || *raw.Quotas[0].ResetAt != reset.Unix() || raw.Quotas[0].AttemptedAt == nil || raw.Quotas[1].ResetAt != nil || raw.Quotas[1].AttemptedAt != nil {
 		t.Fatalf("nullable/Unix timestamps = %#v", raw.Quotas[:2])
 	}
+	if raw.Quotas[0].ElapsedPercent == nil || *raw.Quotas[0].ElapsedPercent != 60 || raw.Quotas[1].ElapsedPercent != nil {
+		t.Fatalf("elapsed percentages = %#v", raw.Quotas[:2])
+	}
+	for _, i := range []int{2, 3, 4} {
+		if raw.Quotas[i].ElapsedPercent == nil || *raw.Quotas[i].ElapsedPercent != 60 {
+			t.Fatalf("provider %s elapsed percentage = %v", raw.Quotas[i].Provider, raw.Quotas[i].ElapsedPercent)
+		}
+	}
 	if raw.Quotas[0].Product != "Max 20×" || raw.Quotas[0].Source == "" || raw.Quotas[0].Detail == "" || raw.Quotas[0].Failure != "" || raw.Quotas[0].Stale {
 		t.Fatalf("Claude shape = %#v", raw.Quotas[0])
 	}
@@ -1180,7 +1221,7 @@ func TestLoadingRefreshingAndCompactIssueRendering(t *testing.T) {
 	for _, detail := range []bool{false, true} {
 		compact.detail = detail
 		view := compact.View()
-		if !strings.Contains(view, "refresh failed today") || !strings.Contains(view, "Refreshing") || strings.Contains(view, "more quotas") {
+		if !strings.Contains(view, "refresh failed just now") || !strings.Contains(view, "Refreshing") || strings.Contains(view, "more quotas") {
 			t.Fatalf("compact detail=%v did not prioritize issues: %q", detail, view)
 		}
 	}
