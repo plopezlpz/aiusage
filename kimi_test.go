@@ -18,6 +18,41 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+func TestParseKimiUsageParsesCurrentQuotaShape(t *testing.T) {
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	input := fmt.Sprintf(`{
+		"code":0,
+		"data":{"kind":"ok","quota":{"usages":{"limit5h":{"usedRatio":0.25,"resetAt":%q},"limit7d":{"usedRatio":0,"resetAt":%q},"unknown":{"usedRatio":0.5,"resetAt":%q}}},"extraUsage":null}
+	}`, now.Add(time.Hour).Format(time.RFC3339), now.Add(24*time.Hour).Format(time.RFC3339), now.Add(48*time.Hour).Format(time.RFC3339))
+
+	got, err := parseKimiUsage([]byte(input), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Window != "5-hour" || got[0].Used != 25 || got[0].Limit != 100 || got[0].RemainingPercentage != 75 {
+		t.Fatalf("5-hour quota = %#v", got)
+	}
+	if got[1].Window != "Weekly" || got[1].Used != 0 || got[1].RemainingPercentage != 100 {
+		t.Fatalf("weekly quota = %#v", got[1])
+	}
+}
+
+func TestParseKimiUsageRejectsInvalidCurrentQuotaShape(t *testing.T) {
+	now := time.Now()
+	reset := now.Add(time.Hour).Format(time.RFC3339)
+	for name, input := range map[string]string{
+		"ratio":    fmt.Sprintf(`{"code":0,"data":{"kind":"ok","quota":{"usages":{"limit5h":{"usedRatio":1.1,"resetAt":%q}}}}}`, reset),
+		"reset":    `{"code":0,"data":{"kind":"ok","quota":{"usages":{"limit5h":{"usedRatio":0.5}}}}}`,
+		"no usage": `{"code":0,"data":{"kind":"ok","quota":{"usages":{}}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseKimiUsage([]byte(input), now); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
 func TestParseKimiUsageNormalizesSummaryAndLimits(t *testing.T) {
 	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 	input := fmt.Sprintf(`{

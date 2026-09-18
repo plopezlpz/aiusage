@@ -56,7 +56,15 @@ type kimiUsageResponse struct {
 		Kind    string            `json:"kind"`
 		Summary *kimiUsageWindow  `json:"summary"`
 		Limits  []kimiUsageWindow `json:"limits"`
+		Quota   *struct {
+			Usages map[string]kimiUsageQuota `json:"usages"`
+		} `json:"quota"`
 	} `json:"data"`
+}
+
+type kimiUsageQuota struct {
+	UsedRatio *float64 `json:"usedRatio"`
+	ResetAt   *string  `json:"resetAt"`
 }
 
 type kimiUsageWindow struct {
@@ -401,6 +409,9 @@ func parseKimiUsage(body []byte, now time.Time) ([]kimiCachedQuota, error) {
 		windows = append(windows, *response.Data.Summary)
 	}
 	windows = append(windows, response.Data.Limits...)
+	if len(windows) == 0 && response.Data.Quota != nil {
+		windows = append(windows, kimiUsageWindowsFromQuota(response.Data.Quota.Usages)...)
+	}
 	quotas := make([]kimiCachedQuota, 0, len(windows))
 	seen := make(map[string]bool, len(windows))
 	for _, window := range windows {
@@ -419,6 +430,41 @@ func parseKimiUsage(body []byte, now time.Time) ([]kimiCachedQuota, error) {
 	}
 	orderKimiQuotas(quotas)
 	return quotas, nil
+}
+
+func kimiUsageWindowsFromQuota(usages map[string]kimiUsageQuota) []kimiUsageWindow {
+	definitions := []struct {
+		key      string
+		duration int64
+		unit     string
+	}{
+		{key: "limit5h", duration: 5, unit: "hour"},
+		{key: "limit7d", duration: 7, unit: "day"},
+	}
+	windows := make([]kimiUsageWindow, 0, len(definitions))
+	for _, definition := range definitions {
+		usage, ok := usages[definition.key]
+		if !ok {
+			continue
+		}
+		usedRatio := usage.UsedRatio
+		if usedRatio == nil || math.IsNaN(*usedRatio) || math.IsInf(*usedRatio, 0) || *usedRatio < 0 || *usedRatio > 1 {
+			windows = append(windows, kimiUsageWindow{Used: usedRatio})
+			continue
+		}
+		used := *usedRatio * 100
+		limit := 100.0
+		windows = append(windows, kimiUsageWindow{
+			Window: &struct {
+				Duration *int64  `json:"duration"`
+				Unit     *string `json:"unit"`
+			}{Duration: &definition.duration, Unit: &definition.unit},
+			Used:    &used,
+			Limit:   &limit,
+			ResetAt: usage.ResetAt,
+		})
+	}
+	return windows
 }
 
 func parseKimiWindow(window kimiUsageWindow, now time.Time) (kimiCachedQuota, error) {
