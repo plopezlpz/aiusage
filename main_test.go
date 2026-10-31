@@ -124,7 +124,7 @@ func TestCollectorRuntimeStartStopRaceAndNilModelPath(t *testing.T) {
 
 	m := model{}
 	commands := m.startCollectors(true)
-	if m.collectors == nil || len(commands) != 4 {
+	if m.collectors == nil || len(commands) != 5 {
 		t.Fatalf("nil-runtime model did not initialize collectors safely: %#v", m)
 	}
 	m.collectors.stop()
@@ -713,17 +713,17 @@ func TestDefaultDashboardSchedulesAllProvidersAndRForcesThem(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	setTestCacheHome(t, t.TempDir())
 	dashboard := newDashboardModel()
-	if !dashboard.claudeCollecting || !dashboard.codexCollecting || !dashboard.kimiCollecting || !dashboard.zaiCollecting || dashboard.Init() == nil {
+	if !dashboard.claudeCollecting || !dashboard.codexCollecting || !dashboard.kimiCollecting || !dashboard.zaiCollecting || !dashboard.antigravityCollecting || dashboard.Init() == nil {
 		t.Fatalf("default startup state = %#v", dashboard)
 	}
 
 	base := model{}
-	if commands := base.startCollectors(true); len(commands) != 4 {
-		t.Fatalf("forced collector command count = %d, want 4", len(commands))
+	if commands := base.startCollectors(true); len(commands) != 5 {
+		t.Fatalf("forced collector command count = %d, want 5", len(commands))
 	}
 	updated, command := (model{}).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 	got := updated.(model)
-	if command == nil || !got.claudeCollecting || !got.codexCollecting || !got.kimiCollecting || !got.zaiCollecting {
+	if command == nil || !got.claudeCollecting || !got.codexCollecting || !got.kimiCollecting || !got.zaiCollecting || !got.antigravityCollecting {
 		t.Fatalf("manual refresh did not force every provider: %#v", got)
 	}
 }
@@ -908,6 +908,10 @@ func writeSnapshotCaches(t *testing.T, now, reset time.Time) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	antigravityPath, _ := antigravityCachePath()
+	if err := writeJSONCache(antigravityPath, antigravityCacheFile{Version: cacheVersion, Provider: "Antigravity", AttemptedAt: attemptedAt}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestDashboardPlanLabelsFallBackWhenUnavailable(t *testing.T) {
@@ -984,7 +988,7 @@ func TestDashboardJSONSnapshotV1(t *testing.T) {
 			t.Fatalf("provider %s elapsed percentage = %v", raw.Quotas[i].Provider, raw.Quotas[i].ElapsedPercent)
 		}
 	}
-	if raw.Quotas[0].Product != "Max 20×" || raw.Quotas[0].Source == "" || raw.Quotas[0].Detail == "" || raw.Quotas[0].Failure != "" || raw.Quotas[0].Stale {
+	if raw.Quotas[0].Product != "Ultra" || raw.Quotas[0].Source == "" || raw.Quotas[0].Detail == "" || raw.Quotas[0].Failure != "" || raw.Quotas[0].Stale {
 		t.Fatalf("Claude shape = %#v", raw.Quotas[0])
 	}
 	zai := raw.Quotas[len(raw.Quotas)-1]
@@ -1014,17 +1018,17 @@ func TestDashboardJSONRefreshSelectionConcurrencyAndPartialFailure(t *testing.T)
 	reset := now.Add(time.Hour)
 	writeSnapshotCaches(t, now, reset)
 
-	if selected := dashboardRefreshProviders("auto", now, nil); selected != [4]bool{} {
+	if selected := dashboardRefreshProviders("auto", now, nil); selected != [5]bool{} {
 		t.Fatalf("fresh auto selection = %v", selected)
 	}
-	if selected := dashboardRefreshProviders("force", now, nil); selected != [4]bool{true, true, true, true} {
+	if selected := dashboardRefreshProviders("force", now, nil); selected != [5]bool{true, true, true, true, true} {
 		t.Fatalf("force selection = %v", selected)
 	}
 	pastReset := now.Add(-resetRefreshDelay)
-	if selected := dashboardRefreshProviders("auto", now, []quota{{Provider: "Claude", ResetAt: &pastReset}}); selected != [4]bool{true, false, false, false} {
+	if selected := dashboardRefreshProviders("auto", now, []quota{{Provider: "Claude", ResetAt: &pastReset}}); selected != [5]bool{true, false, false, false, false} {
 		t.Fatalf("reset override selection = %v", selected)
 	}
-	if selected := dashboardRefreshProviders("auto", now, []quota{{Provider: "Z.AI", ResetAt: &pastReset}}); selected != [4]bool{false, false, false, true} {
+	if selected := dashboardRefreshProviders("auto", now, []quota{{Provider: "Z.AI", ResetAt: &pastReset}}); selected != [5]bool{false, false, false, true, false} {
 		t.Fatalf("Z.AI reset override selection = %v", selected)
 	}
 	expiredReset := now.Add(-2 * resetRefreshDelay)
@@ -1034,14 +1038,14 @@ func TestDashboardJSONRefreshSelectionConcurrencyAndPartialFailure(t *testing.T)
 		{Provider: "Claude", ResetAt: &expiredReset, AttemptedAt: beforeDeadline, Failure: "failed"},
 		{Provider: "Claude", AttemptedAt: afterDeadline, Failure: "failed"},
 	}
-	if selected := dashboardRefreshProviders("auto", now, failedAfterReset); selected != [4]bool{} {
+	if selected := dashboardRefreshProviders("auto", now, failedAfterReset); selected != [5]bool{} {
 		t.Fatalf("fresh failed attempt after reset selected provider again: %v", selected)
 	}
-	if selected := dashboardRefreshProviders("auto", afterDeadline.Add(providerRefreshRate), failedAfterReset); selected != [4]bool{true, true, true, true} {
+	if selected := dashboardRefreshProviders("auto", afterDeadline.Add(providerRefreshRate), failedAfterReset); selected != [5]bool{true, true, true, true, true} {
 		t.Fatalf("expired attempt freshness did not restore normal retries: %v", selected)
 	}
 
-	started := make(chan string, 4)
+	started := make(chan string, 5)
 	release := make(chan struct{})
 	collector := func(provider string, err error) func(context.Context) error {
 		return func(context.Context) error {
@@ -1051,17 +1055,18 @@ func TestDashboardJSONRefreshSelectionConcurrencyAndPartialFailure(t *testing.T)
 		}
 	}
 	collectors := dashboardCollectors{
-		claude: collector("Claude", errors.New("temporary\nfailure")),
-		codex:  collector("OpenAI", nil),
-		kimi:   collector("Kimi", nil),
-		zai:    collector("Z.AI", nil),
+		claude:      collector("Claude", errors.New("temporary\nfailure")),
+		codex:       collector("OpenAI", nil),
+		kimi:        collector("Kimi", nil),
+		zai:         collector("Z.AI", nil),
+		antigravity: collector("Antigravity", nil),
 	}
 	var output bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
 		done <- writeDashboardJSON(context.Background(), "force", &output, collectors, func() time.Time { return now })
 	}()
-	for range 4 {
+	for range 5 {
 		select {
 		case <-started:
 		case <-time.After(time.Second):

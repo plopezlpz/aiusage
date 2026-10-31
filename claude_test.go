@@ -24,10 +24,12 @@ func TestClaudePlanTitle(t *testing.T) {
 		tier         string
 		want         string
 	}{
-		"Max 20x": {"max", "default_claude_max_20x", "Max 20×"},
-		"Max 5x":  {"max", "default_claude_max_5x", "Max 5×"},
-		"Pro":     {"pro", "default", "Pro"},
-		"Unknown": {"custom", "custom", ""},
+		"Legacy Max 20x": {"max", "default_claude_max_20x", "Ultra"},
+		"Legacy Max 5x":  {"max", "default_claude_max_5x", "Max"},
+		"Ultra":          {"ultra", "default", "Ultra"},
+		"Max":            {"max", "default", "Max"},
+		"Pro":            {"pro", "default", "Pro"},
+		"Unknown":        {"custom", "custom", ""},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {

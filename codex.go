@@ -29,6 +29,7 @@ type codexCacheFile struct {
 	AttemptedAt time.Time          `json:"attempted_at,omitempty"`
 	Failure     string             `json:"failure,omitempty"`
 	Quotas      []codexCachedQuota `json:"quotas"`
+	Benefits    []benefitGroup     `json:"benefits,omitempty"`
 }
 
 type codexCachedQuota struct {
@@ -95,7 +96,16 @@ func collectCodexWith(parent context.Context, factory codexCommandFactory, now t
 
 	ctx, cancel := context.WithTimeout(parent, codexCollectionTimeout)
 	defer cancel()
-	plan, quotas, collectErr := fetchCodex(ctx, factory)
+	data, collectErr := fetchCodexData(ctx, factory)
+	var plan string
+	var quotas []codexCachedQuota
+	var benefits []benefitGroup
+	if collectErr == nil {
+		plan, quotas, collectErr = parseCodexRateLimits(data, now)
+		if collectErr == nil {
+			benefits, collectErr = parseCodexBenefits(data)
+		}
+	}
 	if parentCollectionCanceled(parent) {
 		return codexCacheFile{}, context.Canceled
 	}
@@ -119,6 +129,7 @@ func collectCodexWith(parent context.Context, factory codexCommandFactory, now t
 		cache.PlanType = plan
 		cache.UpdatedAt = now
 		cache.Quotas = quotas
+		cache.Benefits = benefits
 	}
 	if err := validateCodexCache(cache, now); err != nil {
 		return codexCacheFile{}, fmt.Errorf("validate Codex data: %w", err)
@@ -136,20 +147,29 @@ func collectCodexWith(parent context.Context, factory codexCommandFactory, now t
 	return cache, collectErr
 }
 
+// fetchCodex is the quota-only view used by protocol integration tests.
 func fetchCodex(ctx context.Context, factory codexCommandFactory) (string, []codexCachedQuota, error) {
+	data, err := fetchCodexData(ctx, factory)
+	if err != nil {
+		return "", nil, err
+	}
+	return parseCodexRateLimits(data, time.Now())
+}
+
+func fetchCodexData(ctx context.Context, factory codexCommandFactory) ([]byte, error) {
 	if !codexProcessGroupsSupported() {
-		return "", nil, errors.New("Codex collection is supported only on Unix")
+		return nil, errors.New("Codex collection is supported only on Unix")
 	}
 	cmd := factory(ctx)
 	configureCodexCommand(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return "", nil, fmt.Errorf("open Codex app-server input: %w", err)
+		return nil, fmt.Errorf("open Codex app-server input: %w", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		_ = stdin.Close()
-		return "", nil, fmt.Errorf("open Codex app-server output: %w", err)
+		return nil, fmt.Errorf("open Codex app-server output: %w", err)
 	}
 	// A direct null-device descriptor avoids os/exec's copy goroutine, which can
 	// otherwise outlive the child when a descendant inherits stderr.
@@ -157,14 +177,14 @@ func fetchCodex(ctx context.Context, factory codexCommandFactory) (string, []cod
 	if err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
-		return "", nil, fmt.Errorf("open null device for Codex app-server: %w", err)
+		return nil, fmt.Errorf("open null device for Codex app-server: %w", err)
 	}
 	cmd.Stderr = null
 	if err := cmd.Start(); err != nil {
 		_ = null.Close()
 		_ = stdin.Close()
 		_ = stdout.Close()
-		return "", nil, fmt.Errorf("start Codex app-server: %w", err)
+		return nil, fmt.Errorf("start Codex app-server: %w", err)
 	}
 	processGroup, err := codexCommandProcessGroup(cmd)
 	_ = null.Close()
@@ -173,7 +193,7 @@ func fetchCodex(ctx context.Context, factory codexCommandFactory) (string, []cod
 		_ = stdout.Close()
 		terminateCodexCommand(cmd, 0)
 		_ = cmd.Wait()
-		return "", nil, fmt.Errorf("record Codex app-server process group: %w", err)
+		return nil, fmt.Errorf("record Codex app-server process group: %w", err)
 	}
 
 	var terminateOnce sync.Once
@@ -219,32 +239,32 @@ func fetchCodex(ctx context.Context, factory codexCommandFactory) (string, []cod
 		"id": 1, "method": "initialize",
 		"params": map[string]any{"clientInfo": map[string]string{"name": "aiusage", "version": "1"}},
 	}); err != nil {
-		return "", nil, fmt.Errorf("initialize Codex app-server: %w", err)
+		return nil, fmt.Errorf("initialize Codex app-server: %w", err)
 	}
 	if _, err := readRPCResponses(ctx, scanner, map[int]string{1: "initialize"}); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if err := encoder.Encode(map[string]any{"method": "initialized", "params": map[string]any{}}); err != nil {
-		return "", nil, fmt.Errorf("notify Codex app-server initialization: %w", err)
+		return nil, fmt.Errorf("notify Codex app-server initialization: %w", err)
 	}
 	if err := encoder.Encode(map[string]any{"id": 2, "method": "account/read", "params": map[string]any{}}); err != nil {
-		return "", nil, fmt.Errorf("request Codex account: %w", err)
+		return nil, fmt.Errorf("request Codex account: %w", err)
 	}
 	if err := encoder.Encode(map[string]any{"id": 3, "method": "account/rateLimits/read", "params": map[string]any{}}); err != nil {
-		return "", nil, fmt.Errorf("request Codex rate limits: %w", err)
+		return nil, fmt.Errorf("request Codex rate limits: %w", err)
 	}
 	responses, err := readRPCResponses(ctx, scanner, map[int]string{2: "account/read", 3: "account/rateLimits/read"})
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	var account accountReadResult
 	if err := json.Unmarshal(responses[2], &account); err != nil {
-		return "", nil, fmt.Errorf("parse Codex account response: %w", err)
+		return nil, fmt.Errorf("parse Codex account response: %w", err)
 	}
 	if account.Account == nil {
-		return "", nil, errors.New("Codex is not signed in — run codex login")
+		return nil, errors.New("Codex is not signed in — run codex login")
 	}
-	return parseCodexRateLimits(responses[3], time.Now())
+	return responses[3], nil
 }
 
 func readRPCResponses(ctx context.Context, scanner *bufio.Scanner, wanted map[int]string) (map[int]json.RawMessage, error) {
@@ -326,7 +346,17 @@ func parseCodexRateLimits(data []byte, now time.Time) (string, []codexCachedQuot
 		})
 	}
 	if len(quotas) == 0 {
-		return "", nil, errors.New("Codex returned no usable rate limits")
+		hasBenefit := false
+		benefits, err := parseCodexBenefits(data)
+		if err != nil {
+			return "", nil, err
+		}
+		for _, benefit := range benefits {
+			hasBenefit = hasBenefit || benefit.Total != nil || benefit.Unlimited
+		}
+		if !hasBenefit {
+			return "", nil, errors.New("Codex returned no usable rate limits")
+		}
 	}
 	return *result.RateLimits.PlanType, quotas, nil
 }
@@ -360,7 +390,10 @@ func validateCodexCache(cache codexCacheFile, now time.Time) error {
 	if cache.Version != cacheVersion || cache.Provider != "OpenAI Codex" {
 		return errors.New("unsupported Codex cache format")
 	}
-	if len(cache.Quotas) > 0 {
+	if err := validateBenefits(cache.Benefits); err != nil {
+		return err
+	}
+	if len(cache.Quotas) > 0 || len(cache.Benefits) > 0 {
 		if !knownCodexPlan(cache.PlanType) {
 			return errors.New("Codex cache plan_type is invalid")
 		}

@@ -93,6 +93,43 @@ final class DashboardSnapshotTests: XCTestCase {
         XCTAssertEqual(updateText(quota(stale: true, failure: "temporary failure")), "Stale · refresh failed unknown")
     }
 
+    func testAntigravityQuotaLabelsAndSnapshot() throws {
+        let generated: Int64 = 1_793_448_000
+        let json = """
+        {"version":1,"generatedAt":\(generated),"state":"ready","message":"","quotas":[
+          {"id":"Antigravity:Gemini 4 Argon · Weekly","provider":"Antigravity","product":"Google","window":"Gemini 4 Argon · Weekly","remainingPercent":86.5,"elapsedPercent":10,"resetAt":\(generated+86400),"updatedAt":\(generated),"attemptedAt":\(generated),"failure":"","source":"Antigravity CLI /usage JSON","detail":"Weekly limit","stale":false},
+          {"id":"Antigravity:Claude + GPT · 5-hour","provider":"Antigravity","product":"Google","window":"Claude + GPT · 5-hour","remainingPercent":100,"elapsedPercent":null,"resetAt":null,"updatedAt":\(generated),"attemptedAt":\(generated),"failure":"","source":"Antigravity CLI /usage JSON","detail":"","stale":false}
+        ]}
+        """
+        let snapshot = try DashboardSnapshot.decode(Data(json.utf8), now: Date(timeIntervalSince1970: TimeInterval(generated)))
+        let groups = QuotaGroup.stableGroups(snapshot.quotas)
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups[0].provider, "Antigravity")
+        XCTAssertEqual(quotaWindowLabel(snapshot.quotas[0]), "Weekly · Gemini 4 Argon")
+        XCTAssertEqual(quotaWindowLabel(snapshot.quotas[1]), "5-hour · Claude + GPT")
+        XCTAssertEqual(groups[0].quotas.map(\.id), [snapshot.quotas[1].id, snapshot.quotas[0].id])
+        XCTAssertNil(snapshot.quotas[1].resetAt)
+        XCTAssertFalse(quotaNeedsAttention(snapshot.quotas[0]))
+    }
+
+    func testAntigravityWindowsFirstStableModelOrderAndUnchangedIDs() {
+        func row(_ id: String, _ window: String, provider: String = "Antigravity") -> DashboardQuota {
+            DashboardQuota(id: id, provider: provider, product: "Google", window: window, remainingPercent: 75, elapsedPercent: nil, resetAt: nil, updatedAt: nil, attemptedAt: nil, failure: "", source: "fixture", detail: "", stale: false)
+        }
+        let input = [row("gw", "Gemini · Weekly"), row("gh", "Gemini · 5-hour"),
+                     row("cw", "Claude + GPT · Weekly"), row("ch", "Claude + GPT · 5-hour"),
+                     row("aw", "Gemini 4 Argon · Weekly"), row("unknown", "Other allowance")]
+        let sorted = QuotaGroup.stableGroups(input)[0].quotas
+        XCTAssertEqual(sorted.map(\.id), ["gh", "ch", "gw", "cw", "aw", "unknown"])
+        XCTAssertEqual(sorted.map(quotaWindowLabel), ["5-hour · Gemini", "5-hour · Claude + GPT",
+            "Weekly · Gemini", "Weekly · Claude + GPT", "Weekly · Gemini 4 Argon", "Other allowance"])
+        XCTAssertEqual(Set(sorted.map(RowVisibility.key)), Set(input.map(RowVisibility.key)))
+        XCTAssertEqual(sorted.first(where: { $0.id == "gw" })?.window, "Gemini · Weekly")
+        let other = [row("weekly", "Weekly", provider: "Claude"), row("session", "5-hour", provider: "Claude")]
+        XCTAssertEqual(QuotaGroup.stableGroups(other)[0].quotas, other)
+        XCTAssertEqual(quotaWindowLabel(other[0]), "Weekly")
+    }
+
     func testDescendantDepthRejectsUnrelatedAndCyclicProcesses() {
         let parents: [pid_t: pid_t] = [40: 30, 30: 20, 20: 10, 60: 50, 70: 71, 71: 70]
         let parentOf: (pid_t) -> pid_t? = { parents[$0] }

@@ -89,6 +89,8 @@ func collectClaudeWith(parent context.Context, loader claudeCredentialLoader, cl
 
 	credentials, err := loader(ctx)
 	var quotas []cachedQuota
+	var benefits []benefitGroup
+	var benefitsErr error
 	if err == nil {
 		if strings.TrimSpace(credentials.AccessToken) == "" {
 			err = errors.New("Claude OAuth access token is unavailable — run claude login")
@@ -96,6 +98,9 @@ func collectClaudeWith(parent context.Context, loader claudeCredentialLoader, cl
 			err = errors.New("Claude OAuth access token is expired — run claude login")
 		} else {
 			quotas, err = fetchClaudeUsage(ctx, client, credentials.AccessToken, now)
+			if err == nil {
+				benefits, benefitsErr = fetchClaudeBenefits(ctx, client, credentials.AccessToken, now)
+			}
 		}
 	}
 	if parentCollectionCanceled(parent) {
@@ -159,6 +164,20 @@ func collectClaudeWith(parent context.Context, loader claudeCredentialLoader, cl
 		cache.RateLimitTier = safeClaudeCredentialLabel(credentials.RateLimitTier)
 		cache.SubscriptionType = safeClaudeCredentialLabel(credentials.SubscriptionType)
 	}
+	if err == nil && (previous.Benefits == nil || !previous.Benefits.AttemptedAt.After(now)) {
+		state := benefitState{AttemptedAt: now}
+		if benefitsErr != nil {
+			if previous.Benefits != nil {
+				state = *previous.Benefits
+			}
+			state.AttemptedAt = now
+			state.Failure = safeCollectionError(benefitsErr)
+		} else {
+			state.UpdatedAt = now
+			state.Groups = benefits
+		}
+		cache.Benefits = &state
+	}
 	if validateErr := validateCache(cache, now); validateErr != nil {
 		return cacheFile{}, fmt.Errorf("validate Claude OAuth usage: %w", validateErr)
 	}
@@ -176,7 +195,15 @@ func collectClaudeWith(parent context.Context, loader claudeCredentialLoader, cl
 }
 
 func fetchClaudeUsage(ctx context.Context, client claudeHTTPDoer, token string, now time.Time) ([]cachedQuota, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, claudeUsageEndpoint, nil)
+	body, err := fetchClaudeJSON(ctx, client, token, claudeUsageEndpoint)
+	if err != nil {
+		return nil, err
+	}
+	return parseClaudeUsage(body, now)
+}
+
+func fetchClaudeJSON(ctx context.Context, client claudeHTTPDoer, token, endpoint string) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, errors.New("create Claude OAuth usage request")
 	}
@@ -203,7 +230,7 @@ func fetchClaudeUsage(ctx context.Context, client claudeHTTPDoer, token string, 
 	if len(body) > maxClaudeResponseSize {
 		return nil, errors.New("Claude OAuth usage response exceeded size limit")
 	}
-	return parseClaudeUsage(body, now)
+	return body, nil
 }
 
 func parseClaudeUsage(body []byte, now time.Time) ([]cachedQuota, error) {
@@ -283,12 +310,12 @@ func parseClaudePercentage(name string, used *float64, resetText *string, now ti
 func claudePlanTitle(subscriptionType, rateLimitTier string) string {
 	switch strings.ToLower(rateLimitTier) {
 	case "default_claude_max_5x":
-		return "Max 5×"
+		return "Max"
 	case "default_claude_max_20x":
-		return "Max 20×"
+		return "Ultra"
 	}
 	switch strings.ToLower(subscriptionType) {
-	case "free", "pro", "max", "team", "enterprise":
+	case "free", "pro", "max", "ultra", "team", "enterprise":
 		return planTitle(strings.ToLower(subscriptionType))
 	default:
 		return ""

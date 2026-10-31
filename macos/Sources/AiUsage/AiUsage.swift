@@ -10,6 +10,7 @@ struct DashboardSnapshot: Decodable, Equatable {
     let state: String
     let message: String
     let quotas: [DashboardQuota]
+    let benefits: [DashboardBenefit]?
 
     static func decode(_ data: Data, now: Date = Date()) throws -> DashboardSnapshot {
         let snapshot = try JSONDecoder().decode(Self.self, from: data)
@@ -29,6 +30,14 @@ struct DashboardSnapshot: Decodable, Equatable {
             throw DashboardDataError.invalid("Invalid generated timestamp.")
         }
         var ids = Set<String>()
+        var benefitKinds = Set<String>()
+        for benefit in benefits ?? [] {
+            guard ids.insert(benefit.id).inserted,
+                  benefitKinds.insert(benefit.provider + "\u{0}" + benefit.group.kind).inserted else {
+                throw DashboardDataError.invalid("Duplicate benefit identifier or kind.")
+            }
+            try benefit.validate(generatedAt: generatedAt)
+        }
         for quota in quotas {
             guard !quota.id.isEmpty, ids.insert(quota.id).inserted else {
                 throw DashboardDataError.invalid("Duplicate or empty quota identifier.")
@@ -76,9 +85,10 @@ struct QuotaGroup: Equatable, Identifiable {
     let provider: String
     let product: String
     var quotas: [DashboardQuota]
+    var benefits: [DashboardBenefit] = []
     var id: String { provider + "\u{0}" + product }
 
-    static func stableGroups(_ quotas: [DashboardQuota]) -> [QuotaGroup] {
+    static func stableGroups(_ quotas: [DashboardQuota], benefits: [DashboardBenefit] = []) -> [QuotaGroup] {
         var groups: [QuotaGroup] = []
         for quota in quotas {
             if let index = groups.firstIndex(where: { $0.provider == quota.provider && $0.product == quota.product }) {
@@ -87,8 +97,30 @@ struct QuotaGroup: Equatable, Identifiable {
                 groups.append(QuotaGroup(provider: quota.provider, product: quota.product, quotas: [quota]))
             }
         }
+        for benefit in benefits {
+            if let index = groups.firstIndex(where: { $0.provider == benefit.provider && $0.product == benefit.product }) {
+                groups[index].benefits.append(benefit)
+            } else {
+                groups.append(QuotaGroup(provider: benefit.provider, product: benefit.product, quotas: [], benefits: [benefit]))
+            }
+        }
+        for index in groups.indices where groups[index].provider == "Antigravity" {
+            // Sort windows, retaining upstream model order within each window.
+            // Keep original IDs/labels in the snapshot so saved visibility survives.
+            groups[index].quotas = groups[index].quotas.enumerated().sorted {
+                let left = antigravityWindowOrder($0.element.window)
+                let right = antigravityWindowOrder($1.element.window)
+                return left == right ? $0.offset < $1.offset : left < right
+            }.map(\.element)
+        }
         return groups
     }
+}
+
+func antigravityWindowOrder(_ window: String) -> Int {
+    if window.hasSuffix(" · 5-hour") { return 0 }
+    if window.hasSuffix(" · Weekly") { return 1 }
+    return 2
 }
 
 enum DashboardDataError: LocalizedError {
@@ -186,7 +218,7 @@ final class DashboardStore: ObservableObject {
     @Published private(set) var refreshKind: DashboardRefresh?
     @Published private(set) var transportError: String?
 
-    var groups: [QuotaGroup] { QuotaGroup.stableGroups(snapshot?.quotas ?? []) }
+    var groups: [QuotaGroup] { QuotaGroup.stableGroups(snapshot?.quotas ?? [], benefits: snapshot?.benefits ?? []) }
 
     private let executable: URL
     private let worker = DispatchQueue(label: "com.plopezlpz.aiusage.dashboard-process", qos: .userInitiated)

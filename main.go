@@ -70,6 +70,7 @@ type cacheFile struct {
 	OAuthAttemptedAt time.Time     `json:"oauth_attempted_at,omitempty"`
 	OAuthFailure     string        `json:"oauth_failure,omitempty"`
 	Quotas           []cachedQuota `json:"quotas"`
+	Benefits         *benefitState `json:"benefits,omitempty"`
 }
 
 type cachedQuota struct {
@@ -93,14 +94,16 @@ type quota struct {
 	Source      string
 	Detail      string
 	Stale       bool
+	Benefit     *benefitGroup
 }
 
 type dashboardSnapshot struct {
-	Version     int                      `json:"version"`
-	GeneratedAt int64                    `json:"generatedAt"`
-	State       string                   `json:"state"`
-	Message     string                   `json:"message"`
-	Quotas      []dashboardSnapshotQuota `json:"quotas"`
+	Version     int                        `json:"version"`
+	GeneratedAt int64                      `json:"generatedAt"`
+	State       string                     `json:"state"`
+	Message     string                     `json:"message"`
+	Quotas      []dashboardSnapshotQuota   `json:"quotas"`
+	Benefits    []dashboardSnapshotBenefit `json:"benefits,omitempty"`
 }
 
 type dashboardSnapshotQuota struct {
@@ -120,17 +123,19 @@ type dashboardSnapshotQuota struct {
 }
 
 type dashboardCollectors struct {
-	claude func(context.Context) error
-	codex  func(context.Context) error
-	kimi   func(context.Context) error
-	zai    func(context.Context) error
+	claude      func(context.Context) error
+	codex       func(context.Context) error
+	kimi        func(context.Context) error
+	zai         func(context.Context) error
+	antigravity func(context.Context) error
 }
 
 var liveDashboardCollectors = dashboardCollectors{
-	claude: func(ctx context.Context) error { _, err := collectClaude(ctx); return err },
-	codex:  func(ctx context.Context) error { _, err := collectCodex(ctx); return err },
-	kimi:   func(ctx context.Context) error { _, err := collectKimi(ctx); return err },
-	zai:    func(ctx context.Context) error { _, err := collectZAI(ctx); return err },
+	claude:      func(ctx context.Context) error { _, err := collectClaude(ctx); return err },
+	codex:       func(ctx context.Context) error { _, err := collectCodex(ctx); return err },
+	kimi:        func(ctx context.Context) error { _, err := collectKimi(ctx); return err },
+	zai:         func(ctx context.Context) error { _, err := collectZAI(ctx); return err },
+	antigravity: func(ctx context.Context) error { _, err := collectAntigravity(ctx); return err },
 }
 
 // tickMsg triggers countdown rerenders and cache reloads while the TUI is open.
@@ -146,6 +151,7 @@ type claudeCollectedMsg struct{ err error }
 type codexCollectedMsg struct{ err error }
 type kimiCollectedMsg struct{ err error }
 type zaiCollectedMsg struct{ err error }
+type antigravityCollectedMsg struct{ err error }
 
 type collectorRuntime struct {
 	ctx    context.Context
@@ -165,19 +171,24 @@ type model struct {
 	codexCollecting       bool
 	kimiCollecting        bool
 	zaiCollecting         bool
+	antigravityCollecting bool
 	claudeError           string
 	codexError            string
 	kimiError             string
 	zaiError              string
+	antigravityError      string
 	claudeErrorAt         time.Time
 	codexErrorAt          time.Time
 	kimiErrorAt           time.Time
 	zaiErrorAt            time.Time
+	antigravityErrorAt    time.Time
 	resetRefreshScheduled map[string]time.Time
 	resetRefreshPending   map[string]time.Time
 	resetRefreshFired     map[string]struct{}
 	collectors            *collectorRuntime
 	quotas                []quota
+	expandedBenefits      map[string]bool
+	benefitScroll         map[string]int
 	loadState             string
 	loadDetail            string
 }
@@ -185,7 +196,7 @@ type model struct {
 func main() {
 	command, ok := parseCommand(os.Args[1:])
 	if !ok {
-		fmt.Fprintf(os.Stderr, "usage: %s [--demo|--claude-oauth|ingest-claude-code|collect-claude|collect-codex|collect-kimi|collect-zai|dashboard-json [--refresh=auto|--refresh=force]]\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(os.Stderr, "usage: %s [--demo|--claude-oauth|ingest-claude-code|collect-claude|collect-codex|collect-kimi|collect-zai|collect-antigravity|dashboard-json [--refresh=auto|--refresh=force]]\n", filepath.Base(os.Args[0]))
 		os.Exit(2)
 	}
 	switch command {
@@ -228,6 +239,13 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println(compactZAIUsage(cache))
+	case "collect-antigravity":
+		cache, err := collectAntigravity(context.Background())
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "aiusage:", err)
+			os.Exit(1)
+		}
+		fmt.Println(compactAntigravityUsage(cache))
 	case "dashboard-json", "dashboard-json --refresh=auto", "dashboard-json --refresh=force":
 		if err := isolateDashboardHelper(); err != nil {
 			fmt.Fprintln(os.Stderr, "aiusage:", err)
@@ -259,7 +277,7 @@ func parseCommand(args []string) (string, bool) {
 		return "", false
 	}
 	switch args[0] {
-	case "--demo", "--claude-oauth", "ingest-claude-code", "collect-claude", "collect-codex", "collect-kimi", "collect-zai", "dashboard-json":
+	case "--demo", "--claude-oauth", "ingest-claude-code", "collect-claude", "collect-codex", "collect-kimi", "collect-zai", "collect-antigravity", "dashboard-json":
 		return args[0], true
 	default:
 		return "", false
@@ -275,10 +293,10 @@ func writeDashboardJSON(ctx context.Context, refresh string, output io.Writer, c
 			provider string
 			err      error
 		}
-		results := make(chan result, 4)
+		results := make(chan result, 5)
 		var active sync.WaitGroup
 		start := func(provider string, selected bool, collect func(context.Context) error) {
-			if !selected {
+			if !selected || collect == nil {
 				return
 			}
 			active.Add(1)
@@ -291,6 +309,7 @@ func writeDashboardJSON(ctx context.Context, refresh string, output io.Writer, c
 		start("OpenAI", selected[1], collectors.codex)
 		start("Kimi", selected[2], collectors.kimi)
 		start("Z.AI", selected[3], collectors.zai)
+		start("Antigravity", selected[4], collectors.antigravity)
 		active.Wait()
 		close(results)
 		attemptedAt := now()
@@ -305,6 +324,8 @@ func writeDashboardJSON(ctx context.Context, refresh string, output io.Writer, c
 				m.kimiError, m.kimiErrorAt = failure, errorAttempt(failure, attemptedAt)
 			case "Z.AI":
 				m.zaiError, m.zaiErrorAt = failure, errorAttempt(failure, attemptedAt)
+			case "Antigravity":
+				m.antigravityError, m.antigravityErrorAt = failure, errorAttempt(failure, attemptedAt)
 			}
 		}
 		if err := ctx.Err(); err != nil {
@@ -316,12 +337,12 @@ func writeDashboardJSON(ctx context.Context, refresh string, output io.Writer, c
 	return json.NewEncoder(output).Encode(newDashboardSnapshot(m, generatedAt))
 }
 
-func dashboardRefreshProviders(refresh string, now time.Time, quotas []quota) [4]bool {
+func dashboardRefreshProviders(refresh string, now time.Time, quotas []quota) [5]bool {
 	if refresh == "force" {
-		return [4]bool{true, true, true, true}
+		return [5]bool{true, true, true, true, true}
 	}
 	claudeFresh, codexFresh, kimiFresh, zaiFresh := freshProviderCaches(now)
-	selected := [4]bool{!claudeFresh, !codexFresh, !kimiFresh, !zaiFresh}
+	selected := [5]bool{!claudeFresh, !codexFresh, !kimiFresh, !zaiFresh, !antigravityCacheFresh(now)}
 	latestAttempts := make(map[string]time.Time)
 	for _, quota := range quotas {
 		if quota.AttemptedAt.After(latestAttempts[quota.Provider]) {
@@ -345,6 +366,8 @@ func dashboardRefreshProviders(refresh string, now time.Time, quotas []quota) [4
 			selected[2] = true
 		case "Z.AI":
 			selected[3] = true
+		case "Antigravity":
+			selected[4] = true
 		}
 	}
 	return selected
@@ -390,6 +413,10 @@ func newDashboardSnapshot(m model, generatedAt time.Time) dashboardSnapshot {
 		Quotas:      make([]dashboardSnapshotQuota, 0, len(m.quotas)),
 	}
 	for _, q := range m.quotas {
+		if q.Benefit != nil {
+			snapshot.Benefits = append(snapshot.Benefits, snapshotBenefit(q))
+			continue
+		}
 		snapshot.Quotas = append(snapshot.Quotas, dashboardSnapshotQuota{
 			ID:               q.Provider + ":" + q.Window,
 			Provider:         q.Provider,
@@ -457,11 +484,12 @@ func (r *collectorRuntime) stop() {
 func newDashboardModel() model {
 	claudeFresh, codexFresh, kimiFresh, zaiFresh := freshProviderCaches(time.Now())
 	return model{
-		claudeCollecting: !claudeFresh,
-		codexCollecting:  !codexFresh,
-		kimiCollecting:   !kimiFresh,
-		zaiCollecting:    !zaiFresh,
-		collectors:       newCollectorRuntime(),
+		claudeCollecting:      !claudeFresh,
+		codexCollecting:       !codexFresh,
+		kimiCollecting:        !kimiFresh,
+		zaiCollecting:         !zaiFresh,
+		antigravityCollecting: !antigravityCacheFresh(time.Now()),
+		collectors:            newCollectorRuntime(),
 	}
 }
 
@@ -514,6 +542,7 @@ func ingest(r io.Reader, w io.Writer) error {
 		if readErr == nil {
 			cache.RateLimitTier = previous.RateLimitTier
 			cache.SubscriptionType = previous.SubscriptionType
+			cache.Benefits = previous.Benefits
 			cache.OAuthAttemptedAt = previous.OAuthAttemptedAt
 			cache.OAuthFailure = previous.OAuthFailure
 			for _, quota := range previous.Quotas {
@@ -751,6 +780,11 @@ func validateCache(cache cacheFile, now time.Time) error {
 	if safeClaudeCredentialLabel(cache.RateLimitTier) != cache.RateLimitTier || safeClaudeCredentialLabel(cache.SubscriptionType) != cache.SubscriptionType {
 		return errors.New("Claude cache account metadata is invalid")
 	}
+	if cache.Benefits != nil {
+		if err := cache.Benefits.validate(now); err != nil {
+			return err
+		}
+	}
 	known := map[string]bool{"5-hour session": true, "Weekly · all": true, "Weekly · Fable": true}
 	seen := make(map[string]bool, len(cache.Quotas))
 	for _, q := range cache.Quotas {
@@ -847,6 +881,9 @@ func (m model) Init() tea.Cmd {
 	if m.zaiCollecting {
 		commands = append(commands, collectZAICmd(m.collectors))
 	}
+	if m.antigravityCollecting {
+		commands = append(commands, collectAntigravityCmd(m.collectors))
+	}
 	commands = append(commands, func() tea.Msg { return scheduleResetRefreshMsg{} })
 	return tea.Batch(commands...)
 }
@@ -919,16 +956,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		commands := []tea.Cmd{m.startPendingResetRefresh("Z.AI")}
 		commands = append(commands, m.resetRefreshCmds(time.Now())...)
 		return m, tea.Batch(commands...)
+	case antigravityCollectedMsg:
+		m.antigravityCollecting = false
+		m.antigravityError = safeCollectionError(msg.err)
+		m.antigravityErrorAt = errorTime(m.antigravityError)
+		m.reload()
+		commands := []tea.Cmd{m.startPendingResetRefresh("Antigravity")}
+		commands = append(commands, m.resetRefreshCmds(time.Now())...)
+		return m, tea.Batch(commands...)
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "esc", "left", "h":
-			m.detail = false
-		case "enter", "right", "l":
-			if len(m.quotas) > 0 {
-				m.detail = true
+			if !m.detail && len(m.quotas) > 0 {
+				delete(m.expandedBenefits, quotaKey(m.quotas[m.selected]))
 			}
+			m.detail = false
+		case "enter", "right", "l", " ":
+			if len(m.quotas) > 0 {
+				q := m.quotas[m.selected]
+				if q.Benefit != nil && q.Benefit.expandable() && !m.detail {
+					if m.expandedBenefits == nil {
+						m.expandedBenefits = make(map[string]bool)
+					}
+					key := quotaKey(q)
+					m.expandedBenefits[key] = !m.expandedBenefits[key]
+					delete(m.benefitScroll, key)
+				} else {
+					m.detail = true
+				}
+			}
+		case "d":
+			m.detail = len(m.quotas) > 0
+		case "pgdown", "pgup":
+			m.scrollBenefit(msg.String() == "pgdown")
 		case "up", "k":
 			if !m.detail && m.selected > 0 {
 				m.selected--
@@ -981,6 +1043,11 @@ func (m *model) startCollectors(force bool) []tea.Cmd {
 			commands = append(commands, command)
 		}
 	}
+	if force || !antigravityCacheFresh(time.Now()) {
+		if command := m.startProviderCollector("Antigravity"); command != nil {
+			commands = append(commands, command)
+		}
+	}
 	return commands
 }
 
@@ -1009,6 +1076,11 @@ func (m *model) startProviderCollector(provider string) tea.Cmd {
 			m.zaiCollecting = true
 			return collectZAICmd(m.collectors)
 		}
+	case "Antigravity":
+		if !m.antigravityCollecting {
+			m.antigravityCollecting = true
+			return collectAntigravityCmd(m.collectors)
+		}
 	}
 	return nil
 }
@@ -1023,6 +1095,8 @@ func (m model) providerCollecting(provider string) bool {
 		return m.kimiCollecting
 	case "Z.AI":
 		return m.zaiCollecting
+	case "Antigravity":
+		return m.antigravityCollecting
 	default:
 		return false
 	}
@@ -1170,7 +1244,7 @@ func safeCollectionError(err error) string {
 }
 
 func (m model) collecting() bool {
-	return m.claudeCollecting || m.codexCollecting || m.kimiCollecting || m.zaiCollecting
+	return m.claudeCollecting || m.codexCollecting || m.kimiCollecting || m.zaiCollecting || m.antigravityCollecting
 }
 
 func errorTime(text string) time.Time {
@@ -1259,7 +1333,7 @@ func (m model) dashboardView(width, height int) string {
 	lines = append(lines, dimStyle.Render(strings.Repeat("─", width)))
 	lines = append(lines, m.footerLines(width, false)...)
 	if len(lines) > height {
-		return m.compactDashboard(width, height)
+		return m.scrolledDashboard(width, height)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -1279,6 +1353,9 @@ func providerLine(q quota, width int) string {
 }
 
 func (m model) quotaLine(q quota, selected bool, width int) string {
+	if q.Benefit != nil {
+		return m.benefitLine(q, selected, width, time.Now())
+	}
 	cursor := "  "
 	if selected {
 		cursor = selectedStyle.Render("> ")
@@ -1313,8 +1390,12 @@ func (m model) quotaLine(q quota, selected bool, width int) string {
 	}
 	const percentageWidth = 9 // "100% left"
 	percentage = quotaValueStyle(q.Remaining).Render(fmt.Sprintf("%-*s", percentageWidth, percentageText))
-	barWidth := min(20, max(8, width-47))
-	fixed := 2 + 12 + 1 + barWidth + 2 + percentageWidth + 2
+	labelWidth := 12
+	if q.Provider == "Antigravity" {
+		labelWidth = 26
+	}
+	barWidth := min(20, max(8, width-47-(labelWidth-12)))
+	fixed := 2 + labelWidth + 1 + barWidth + 2 + percentageWidth + 2
 	if fixed >= width {
 		return m.quotaLine(q, selected, 59)
 	}
@@ -1323,7 +1404,7 @@ func (m model) quotaLine(q quota, selected bool, width int) string {
 	if q.Stale {
 		statusView = warningStyle.Render(status)
 	}
-	return fmt.Sprintf("%s%-12s %s  %s  %s", cursor, truncateText(shortWindow(q.Window), 12), renderBar(q.Remaining, barWidth), percentage, statusView)
+	return fmt.Sprintf("%s%-*s %s  %s  %s", cursor, labelWidth, truncateText(shortWindow(q.Window), labelWidth), renderBar(q.Remaining, barWidth), percentage, statusView)
 }
 
 func refreshFailureStatus(q quota) string {
@@ -1416,6 +1497,9 @@ func renderBar(remaining float64, width int) string {
 
 func (m model) detailView(width, height int) string {
 	q := m.quotas[m.selected]
+	if q.Benefit != nil {
+		return m.benefitDetail(q, width, height)
+	}
 	lines := []string{
 		titleStyle.Render(truncateText("AI Usage · Details", width)),
 		dimStyle.Render(strings.Repeat("─", width)),
@@ -1464,7 +1548,7 @@ func (m model) detailView(width, height int) string {
 }
 
 func (m model) footerLines(width int, detail bool) []string {
-	items := []string{"[↑↓/jk] select", "[enter/→/l] details"}
+	items := []string{"[↑↓/jk] select", "[enter] details/expand", "[d] details"}
 	if detail {
 		items = []string{"[esc/←/h] back"}
 	}
@@ -1504,6 +1588,9 @@ func (m model) compactDashboard(width, height int) string {
 		return strings.Join(lines[:min(height, len(lines))], "\n")
 	}
 	q := m.quotas[m.selected]
+	if q.Benefit != nil {
+		return m.compactBenefit(q, width, height)
+	}
 	value := fmt.Sprintf("> %s %s %.0f%%", q.Provider, shortWindow(q.Window), q.Remaining)
 	status := resetLabel(q)
 	if q.Failure != "" {
@@ -1729,6 +1816,14 @@ func (m *model) reloadAt(now time.Time) {
 				Stale:       q.Source == claudeOAuthSource && failure != "" || quotaIsStale(updatedAt, q.ResetsAt, now),
 			})
 		}
+		if claudeCache.Benefits != nil {
+			state := claudeCache.Benefits
+			groups := append([]benefitGroup{unavailableClaudeBenefits()[0]}, state.Groups...)
+			if len(state.Groups) == 0 {
+				groups = append(groups, unavailableClaudeBenefits()[1])
+			}
+			m.appendBenefits("Claude", product, groups, state.UpdatedAt, currentAttempt(state.AttemptedAt, m.claudeError, m.claudeErrorAt), currentFailure(state.Failure, oauthFailure), claudeOAuthSource, now)
+		}
 	}
 
 	codexCache, codexErr := readCodexCache()
@@ -1758,6 +1853,7 @@ func (m *model) reloadAt(now time.Time) {
 				Stale:       codexFailure != "" || quotaIsStale(codexCache.UpdatedAt, &reset, now),
 			})
 		}
+		m.appendBenefits("OpenAI", product, codexCache.Benefits, codexCache.UpdatedAt, currentAttempt(codexCache.AttemptedAt, m.codexError, m.codexErrorAt), codexFailure, "Codex app-server (experimental)", now)
 	}
 
 	kimiCache, kimiErr := readKimiCache()
@@ -1817,7 +1913,11 @@ func (m *model) reloadAt(now time.Time) {
 		}
 	}
 
+	antigravityDetail := m.reloadAntigravity(now)
 	details := m.unavailableProviderDetails(claudeCache, claudeErr, codexCache, codexErr, kimiCache, kimiErr, zaiCache, zaiErr)
+	if antigravityDetail != "" {
+		details = append(details, antigravityDetail)
+	}
 	if len(m.quotas) == 0 {
 		m.selected = 0
 		m.detail = false
@@ -1875,7 +1975,7 @@ func (m model) unavailableProviderDetails(claude cacheFile, claudeErr error, cod
 			details = append(details, "Claude: open Claude Code and send one prompt")
 		}
 	}
-	if len(codex.Quotas) == 0 {
+	if len(codex.Quotas) == 0 && len(codex.Benefits) == 0 {
 		if m.codexError != "" {
 			details = append(details, "Codex: "+m.codexError)
 		} else if codexErr == nil && codex.Failure != "" {
@@ -1919,7 +2019,7 @@ func newDemoModel() model {
 	now := time.Now()
 	inTwoHours := now.Add(2*time.Hour + 8*time.Minute)
 	inThreeDays := now.Add(3 * 24 * time.Hour)
-	return model{demo: true, quotas: []quota{
+	m := model{demo: true, quotas: []quota{
 		{Provider: "Claude", Product: "Max", Window: "5-hour session", Duration: 5 * time.Hour, Remaining: 24, ResetAt: &inTwoHours, UpdatedAt: now, Source: "demo fixture", Detail: "Demo values only; no account was accessed."},
 		{Provider: "Claude", Product: "Max", Window: "Weekly · all", Duration: 7 * 24 * time.Hour, Remaining: 63, ResetAt: &inThreeDays, UpdatedAt: now, Source: "demo fixture", Detail: "Demo values only; no account was accessed."},
 		{Provider: "Kimi", Product: "Code", Window: "5-hour", Duration: 5 * time.Hour, Remaining: 72, ResetAt: &inTwoHours, UpdatedAt: now.Add(-time.Minute), Source: "demo fixture", Detail: "Demo values only; live Kimi collection is available in normal mode."},
@@ -1927,4 +2027,6 @@ func newDemoModel() model {
 		{Provider: "Z.AI", Product: "Coding Plan", Window: "5-hour", Duration: 5 * time.Hour, Remaining: 88, ResetAt: &inTwoHours, UpdatedAt: now.Add(-time.Minute), Source: "demo fixture", Detail: "Demo values only; live Z.AI collection is available in normal mode."},
 		{Provider: "Z.AI", Product: "Coding Plan", Window: "Weekly", Duration: 7 * 24 * time.Hour, Remaining: 91, ResetAt: &inThreeDays, UpdatedAt: now.Add(-time.Minute), Source: "demo fixture", Detail: "Demo values only; live Z.AI collection is available in normal mode."},
 	}}
+	m.addDemoBenefits(now)
+	return m
 }

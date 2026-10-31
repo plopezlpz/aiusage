@@ -2,16 +2,26 @@ import AppKit
 import SwiftUI
 
 struct DashboardView: View {
-    static let preferredWidth: CGFloat = 470
+    static let preferredWidth: CGFloat = DashboardColumns.width
 
     @ObservedObject var store: DashboardStore
     let onSizeChange: (CGSize) -> Void
     @State private var selectedID: String?
     @State private var originatingQuotaID: String?
+    @State private var expandedBenefitIDs: Set<String> = []
+    @StateObject private var visibility: RowVisibility
+
+    init(store: DashboardStore, onSizeChange: @escaping (CGSize) -> Void, visibility: RowVisibility = RowVisibility()) {
+        self.store = store
+        self.onSizeChange = onSizeChange
+        _visibility = StateObject(wrappedValue: visibility)
+    }
+
     @FocusState private var focusedControl: FocusTarget?
 
     private enum FocusTarget: Hashable {
         case quota(String)
+        case hiddenItems(String)
         case back
         case quit
     }
@@ -27,6 +37,8 @@ struct DashboardView: View {
         .background(SizeReader())
         .onPreferenceChange(DashboardSizeKey.self, perform: onSizeChange)
         .onReceive(store.$snapshot) { snapshot in
+            // Stable IDs preserve disclosure state across refreshes; prune rows that disappear.
+            expandedBenefitIDs.formIntersection(Set((snapshot?.benefits ?? []).map(\.id)))
             if let selectedID, snapshot?.quotas.contains(where: { $0.id == selectedID }) != true {
                 self.selectedID = nil
                 originatingQuotaID = nil
@@ -38,16 +50,10 @@ struct DashboardView: View {
     @ViewBuilder private var page: some View {
         let visibleScreenHeight = NSScreen.screens.map(\.visibleFrame.height).min() ?? 700
         let maximumHeight = dashboardMaximumPageHeight(visibleScreenHeight: visibleScreenHeight)
-        if selectedID != nil {
-            ScrollView { paddedPageContent }
-                .id(selectedID)
-                .frame(height: min(330, maximumHeight))
-        } else if estimatedDashboardHeight > maximumHeight {
-            ScrollView { paddedPageContent }
-                .frame(height: maximumHeight)
-        } else {
+        ContentFittingScrollView(maximumHeight: maximumHeight) {
             paddedPageContent
         }
+        .id(selectedID)
     }
 
     private var paddedPageContent: some View {
@@ -63,16 +69,6 @@ struct DashboardView: View {
         } else {
             dashboard
         }
-    }
-
-    private var estimatedDashboardHeight: CGFloat {
-        let groupCount = store.groups.count
-        let rowCount = store.groups.reduce(0) { $0 + $1.quotas.count }
-        let snapshotBanner = store.snapshot.map { $0.state != "ready" && !$0.message.isEmpty } ?? false
-        let bannerCount = (store.transportError == nil ? 0 : 1) + (snapshotBanner ? 1 : 0)
-        let groupHeight = groupCount * 34 + max(0, groupCount - 1) * 12
-        let contentHeight = groupHeight + rowCount * 31 + bannerCount * 70 + 16
-        return CGFloat(contentHeight)
     }
 
     private var header: some View {
@@ -168,32 +164,73 @@ struct DashboardView: View {
     }
 
     private func provider(_ group: QuotaGroup) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    providerName(group)
-                    Spacer(minLength: 8)
-                    Text("Updated \(relativeTime(group.quotas.compactMap(\.updatedAt).max()))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize()
+        let quotas = group.quotas.filter { visibility.isVisible(RowVisibility.key($0), in: group) }
+        let benefits = group.benefits.filter { visibility.isVisible(RowVisibility.key($0), in: group) }
+        let hiddenCount = visibility.hiddenCount(in: group)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 8) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        providerName(group)
+                        Spacer(minLength: 8)
+                        providerUpdate(group)
+                            .fixedSize()
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        providerName(group)
+                        providerUpdate(group)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                VStack(alignment: .leading, spacing: 2) {
-                    providerName(group)
-                    Text("Updated \(relativeTime(group.quotas.compactMap(\.updatedAt).max()))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                if hiddenCount > 0 {
+                    HiddenItemsButton(count: hiddenCount, revealed: visibility.revealedGroups.contains(group.id), provider: group.provider) {
+                        visibility.toggleReveal(group)
+                    }
+                    .fixedSize()
+                    .focused($focusedControl, equals: .hiddenItems(group.id))
                 }
             }
             .padding(.horizontal, 14)
             .padding(.top, 6)
             .padding(.bottom, 8)
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: .contain)
 
-            ForEach(group.quotas) { quota in
-                quotaRow(quota)
+            ForEach(quotas) { quota in
+                visibilityRow(id: RowVisibility.key(quota), title: quotaWindowLabel(quota), group: group) {
+                    quotaRow(quota)
+                }
+            }
+            if !benefits.isEmpty {
+                Color.clear.frame(height: 3)
+                ForEach(benefits) { benefit in
+                    visibilityRow(id: RowVisibility.key(benefit), title: benefit.group.title, group: group) {
+                        BenefitRow(benefit: benefit, expandedIDs: $expandedBenefitIDs)
+                    }
+                }
+            }
+            if quotas.isEmpty && benefits.isEmpty && hiddenCount > 0 {
+                Text("All items hidden")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 6)
             }
         }
+    }
+
+    private func providerUpdate(_ group: QuotaGroup) -> some View {
+        Text("Updated \(relativeTime(group.quotas.compactMap(\.updatedAt).max()))")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    private func visibilityRow<Content: View>(id: String, title: String, group: QuotaGroup, @ViewBuilder content: @escaping () -> Content) -> some View {
+        VisibilityRow(hidden: visibility.hiddenIDs.contains(id), title: title, setHidden: { hidden in
+            visibility.setHidden(hidden, id: id, in: group)
+            if hidden && !visibility.revealedGroups.contains(group.id) {
+                focusedControl = .hiddenItems(group.id)
+            }
+        }, content: content)
     }
 
     private func providerName(_ group: QuotaGroup) -> some View {
@@ -209,54 +246,32 @@ struct DashboardView: View {
         let state = semanticState(quota.remainingPercent)
         let elapsedAccessibility = quota.elapsedPercent.map { ", \(compactPercent($0)) percent of window elapsed" } ?? ""
         return Button { showDetail(quota.id) } label: {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    Text(quota.window)
-                        .font(.subheadline)
-                        .lineLimit(1)
-                        .padding(.leading, 10)
-                        .frame(width: 100, alignment: .leading)
-                    QuotaBar(value: quota.remainingPercent, elapsed: quota.elapsedPercent, tint: state.color)
-                        .frame(width: 120)
-                    Text("\(compactPercent(quota.remainingPercent))% left")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .frame(width: 58, alignment: .trailing)
-                    Text(resetText(quota.resetAt))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .frame(width: 112, alignment: .leading)
+            DashboardRowColumns {
+                Text(quotaWindowLabel(quota))
+                    .padding(.leading, DashboardColumns.labelInset)
+                    .help(quotaWindowLabel(quota))
+            } bar: {
+                QuotaBar(value: quota.remainingPercent, elapsed: quota.elapsedPercent, tint: state.color)
+            } value: {
+                Text("\(compactPercent(quota.remainingPercent))%")
+            } status: {
+                Text(compactResetText(quota.resetAt))
+                    .help("\(resetText(quota.resetAt))\n\(exactDate(quota.resetAt))")
+            }
+            .overlay(alignment: .leading) {
+                if quotaNeedsAttention(quota) {
                     quotaStatusIcon(quota)
-                        .frame(width: 8)
-                }
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack {
-                        Text(quota.window)
-                            .font(.subheadline)
-                            .padding(.leading, 10)
-                        Spacer()
-                        Text("\(compactPercent(quota.remainingPercent))% left")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.primary)
-                        quotaStatusIcon(quota)
-                    }
-                    HStack(spacing: 8) {
-                        QuotaBar(value: quota.remainingPercent, elapsed: quota.elapsedPercent, tint: state.color)
-                        Text(resetText(quota.resetAt))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                        .frame(width: 10)
+                        .offset(x: -DashboardColumns.horizontalPadding)
                 }
             }
             .contentShape(Rectangle())
-            .padding(.horizontal, 14)
-            .padding(.vertical, 4)
+            .padding(.horizontal, DashboardColumns.horizontalPadding)
         }
         .buttonStyle(.plain)
         .focused($focusedControl, equals: .quota(quota.id))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(quota.provider) \(quota.product), \(quota.window)")
+        .accessibilityLabel("\(quota.provider) \(quota.product), \(quotaWindowLabel(quota))")
         .accessibilityValue("\(compactPercent(quota.remainingPercent)) percent remaining, \(state.label)\(elapsedAccessibility), \(resetText(quota.resetAt)), \(updateText(quota))")
         .accessibilityHint("Shows quota details")
     }
@@ -284,7 +299,7 @@ struct DashboardView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(quota.window).font(.headline)
+                    Text(quotaWindowLabel(quota)).font(.headline)
                     ViewThatFits(in: .horizontal) {
                         HStack(alignment: .firstTextBaseline) {
                             Text("\(compactPercent(quota.remainingPercent))% remaining")
@@ -444,13 +459,13 @@ private struct QuotaBar: View {
                         .fill(Color.white.opacity(0.75))
                         .frame(width: markerWidth)
                         .blendMode(.difference)
-                        .padding(.vertical, 4 / max(displayScale, 1))
+                        .padding(.vertical, quotaMarkerVerticalInset(displayScale: displayScale))
                         .offset(x: quotaMarkerOffset(width: proxy.size.width, elapsed: elapsed, displayScale: displayScale))
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
         }
-        .frame(height: 14)
+        .frame(height: DashboardColumns.barHeight)
         .accessibilityElement()
         .accessibilityLabel("Quota window pacing")
         .accessibilityValue(elapsed.map { "\(compactPercent($0)) percent elapsed" } ?? "")
@@ -487,14 +502,50 @@ private struct SizeReader: View {
     }
 }
 
+// Measure the intrinsic page, not the constrained scroll viewport. This also
+// handles wrapped labels, error banners, and expanded grants without estimates.
+struct ContentFittingScrollView<Content: View>: View {
+    let maximumHeight: CGFloat
+    @ViewBuilder var content: () -> Content
+    @State private var contentHeight: CGFloat = 0
+
+    @ViewBuilder var body: some View {
+        if contentHeight > maximumHeight {
+            ScrollView { measuredContent }
+                .frame(height: maximumHeight)
+        } else {
+            // Start with intrinsic layout, never a tiny scroll viewport: AppKit
+            // must be able to discover the full content before resizing its panel.
+            measuredContent
+        }
+    }
+
+    private var measuredContent: some View {
+        content()
+            .frame(maxWidth: .infinity)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(GeometryReader { proxy in
+                Color.clear
+                    .onAppear { measure(proxy.size.height) }
+                    .onChange(of: proxy.size.height) { measure($0) }
+            })
+    }
+
+    private func measure(_ height: CGFloat) {
+        guard height.isFinite, height > 0 else { return }
+        contentHeight = ceil(height)
+    }
+}
+
 func dashboardMaximumPageHeight(visibleScreenHeight: CGFloat) -> CGFloat {
     max(100, visibleScreenHeight - 96)
 }
 
-private func providerIconResource(_ provider: String) -> String? {
+func providerIconResource(_ provider: String) -> String? {
     switch provider.lowercased() {
     case let name where name.contains("claude"): return "claude"
     case let name where name.contains("openai") || name.contains("codex"): return "openai"
+    case let name where name.contains("antigravity"): return "antigravity"
     case let name where name.contains("kimi"): return "kimi"
     case let name where name.contains("z.ai") || name.contains("zhipu"): return "zai"
     default: return nil
@@ -505,13 +556,14 @@ private func providerSymbol(_ provider: String) -> String {
     switch provider.lowercased() {
     case let name where name.contains("claude"): return "sparkles"
     case let name where name.contains("openai") || name.contains("codex"): return "chevron.left.forwardslash.chevron.right"
+    case let name where name.contains("antigravity"): return "arrow.up.forward.circle"
     case let name where name.contains("kimi"): return "moon.stars.fill"
     case let name where name.contains("z.ai") || name.contains("zhipu"): return "circle.hexagongrid.fill"
     default: return "cpu"
     }
 }
 
-private extension Color {
+extension Color {
     static let usageGreen = Color(red: 192 / 255, green: 207 / 255, blue: 144 / 255)
     static let usageOrange = Color(red: 255 / 255, green: 159 / 255, blue: 10 / 255)
     static let usageRed = Color(red: 203 / 255, green: 65 / 255, blue: 72 / 255)
@@ -524,8 +576,18 @@ private func semanticState(_ value: Double) -> (label: String, color: Color) {
     return ("Healthy", .usageGreen)
 }
 
+func quotaWindowLabel(_ quota: DashboardQuota) -> String {
+    guard quota.provider == "Antigravity", antigravityWindowOrder(quota.window) < 2,
+          let separator = quota.window.range(of: " · ", options: .backwards) else { return quota.window }
+    return String(quota.window[separator.upperBound...]) + " · " + String(quota.window[..<separator.lowerBound])
+}
+
 func quotaNeedsAttention(_ quota: DashboardQuota) -> Bool {
     quota.stale || !quota.failure.isEmpty
+}
+
+func quotaMarkerVerticalInset(displayScale: CGFloat) -> CGFloat {
+    2 / max(displayScale, 1)
 }
 
 func quotaMarkerOffset(width: CGFloat, elapsed: Double, displayScale: CGFloat) -> CGFloat {
@@ -541,8 +603,18 @@ private func normalizedPercent(_ value: Double) -> Double {
     (value * 100).rounded() / 100
 }
 
-private func compactPercent(_ value: Double) -> String {
-    normalizedPercent(value).formatted(.number.precision(.fractionLength(0...2)))
+func compactPercent(_ value: Double) -> String {
+    value.rounded().formatted(.number.precision(.fractionLength(0)))
+}
+
+func compactResetText(_ timestamp: Int64?, now: Date = Date()) -> String {
+    guard let timestamp else { return "—" }
+    let interval = Date(timeIntervalSince1970: TimeInterval(timestamp)).timeIntervalSince(now)
+    if interval <= 0 { return "Due" }
+    if interval < 60 { return "<1m" }
+    if interval < 3600 { return "\(Int(interval / 60))m" }
+    if interval < 86400 { return "\(Int(interval / 3600))h \(Int(interval.truncatingRemainder(dividingBy: 3600) / 60))m" }
+    return "\(Int(ceil(interval / 86400)))d"
 }
 
 private func resetText(_ timestamp: Int64?) -> String {

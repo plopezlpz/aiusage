@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Usage — compact layout options</title>
+<style>
+:root{color-scheme:dark;--page:#101514;--ink:#ecf0ee;--muted:#a5b3ac;--dim:#77877e;--green:#c0cf90;--blue:#80bcff;--line:rgba(255,255,255,.09)}
+*{box-sizing:border-box}body{margin:0;background:var(--page);color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button{font:inherit;color:inherit;cursor:pointer}button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--blue);outline-offset:3px}button:disabled{cursor:default}button svg{width:14px;height:14px;vertical-align:middle;flex-shrink:0}.shell{max-width:1440px;margin:auto;padding:38px 28px 48px}.eyebrow{color:var(--green);text-transform:uppercase;font-size:11px;letter-spacing:.15em;font-weight:650}h1{font-size:30px;letter-spacing:-.035em;line-height:1.15;margin:10px 0 12px;font-weight:650}.intro{max-width:790px;color:var(--muted);margin:0;font-size:15px;line-height:1.6}.intro strong{color:var(--ink);font-weight:550}.recommendation{margin:20px 0 24px;padding:13px 16px;background:rgba(192,207,144,.065);border:1px solid rgba(192,207,144,.2);border-radius:10px;max-width:920px}.recommendation strong{color:var(--green)}.recommendation span{color:var(--muted)}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin:0 0 22px}.filters{display:flex;gap:4px;padding:4px;background:#1c2420;border:1px solid var(--line);border-radius:9px}.filters button{border:0;background:transparent;border-radius:5px;padding:6px 11px;font-size:12px;color:var(--muted)}.filters button[aria-pressed=true]{background:#354037;color:var(--ink)}.hint{color:var(--muted);font-size:12px}.options{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start}.option{width:calc(var(--w) + 24px);min-width:0;max-width:100%}.option[hidden]{display:none}.option-head{height:125px;padding:0 2px}.option-title{display:flex;align-items:center;gap:8px;margin:0 0 7px;font-size:18px;letter-spacing:-.02em}.letter{font-size:11px;border:1px solid #4a584d;border-radius:5px;padding:2px 6px;color:var(--muted)}.recommended{margin-left:auto;color:var(--green);font-size:10px;letter-spacing:.02em;border:1px solid #57613f;padding:3px 6px;border-radius:20px}.option-copy{font-size:12px;color:var(--muted);margin:0 0 12px;max-width:385px}.width-line{display:flex;align-items:center;gap:9px;font-size:11px;color:var(--muted)}.width-track{height:4px;background:#354039;max-width:180px;flex:1;border-radius:4px;overflow:hidden}.width-track span{display:block;height:100%;background:#9cae82}.width-line b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.panel{width:var(--w);max-width:100%;margin:0 auto;background:linear-gradient(125deg,#25372e,#202d27 55%,#24372c);border:1px solid #637069;border-radius:13px;box-shadow:0 12px 30px #0004,0 0 0 1px #0006;font-size:12px;overflow:hidden}.panel-top{height:44px;display:flex;align-items:center;gap:8px;padding:0 13px;border-bottom:1px solid #ffffff09}.app-mark{width:17px;height:17px;color:#a7b5ad}.panel-top strong{font-size:13px;font-weight:650}.demo-tag{font-size:9px;letter-spacing:.06em;color:var(--muted);border:1px solid #7e8a7940;border-radius:3px;padding:1px 4px}.panel-tools{margin-left:auto;display:flex;gap:12px;align-items:center;color:var(--muted);font-size:11px}.panel-tools svg{height:14px;width:14px}.legend{height:24px;padding:0 12px;display:grid;align-items:center;color:#a6b3ab;font-size:9px;letter-spacing:.025em}.a .legend{grid-template-columns:136px minmax(0,1fr) 44px 42px;gap:3px}.b .legend,.c .legend{grid-template-columns:minmax(0,1fr) 94px 48px;gap:8px}.legend .right{text-align:right}.provider{padding:0 12px 11px}.provider + .provider{padding-top:1px}.provider-head{display:flex;align-items:center;gap:6px;min-height:32px;padding:3px 0 4px}.provider-icon{width:17px;height:17px;object-fit:contain;flex:0 0 auto}.provider-icon.mono{filter:brightness(0) invert(.9)}.provider-icon.kimi{background:#080c09;border-radius:4px;padding:1px}.provider-name{font-size:12px;font-weight:650}.plan{color:var(--muted);font-size:11px;white-space:nowrap}.spacer{flex:1}.provider-updated{font-size:9px;color:var(--muted);white-space:nowrap}.reveal{display:flex;gap:4px;align-items:center;border:0;border-radius:20px;background:#ffffff07;padding:3px 6px;font-size:10px;color:var(--muted)}.reveal[aria-pressed=true]{background:#80bcff18;color:var(--blue)}.row{position:relative;display:grid;align-items:center;width:100%;border:0;background:transparent;border-radius:4px;padding:0;text-align:left;min-width:0;height:25px;line-height:1}.row:hover{background:#ffffff08}.a .row{grid-template-columns:136px minmax(0,1fr) 44px 42px;gap:3px}.b .row,.c .row{grid-template-columns:minmax(0,1fr) 94px 48px;gap:8px;height:27px}.row-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;font-size:11px;padding-left:3px}.row.benefit .row-label{font-weight:450}.a .benefit .row-label{grid-column:1 / 3}.value{text-align:right;white-space:nowrap;font-size:11px;font-weight:600;letter-spacing:-.015em;font-variant-numeric:tabular-nums;position:relative;min-width:0}.time{text-align:right;font-size:10px;color:#b5c3b9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.time.unknown{color:#82958a}.bar{height:8px;border-radius:2px;background:#89998a40;position:relative;overflow:hidden}.fill{height:100%;width:var(--pct);background:var(--green);border-radius:2px}.marker{position:absolute;height:100%;width:1px;left:var(--marker);top:0;background:#a28fae}.b .value,.c .value{padding:0 5px;height:22px;display:flex;align-items:center;justify-content:flex-end}.b .value.meter,.c .value.meter{background:#ffffff04;border-radius:3px;padding-bottom:4px}.mini-track{position:absolute;left:5px;right:5px;bottom:1px;height:3px;background:#89998a40;overflow:hidden;border-radius:2px}.mini-track .fill{background:#c0cf90cc}.row.is-hidden{background:#c0cf9009;color:#b1beb5}.row.is-hidden .bar,.row.is-hidden .mini-track{opacity:.55}.hidden-mark{display:inline-flex;vertical-align:-1px;margin-right:4px}.hidden-mark svg{width:11px;height:11px}.provider-note{display:flex;align-items:center;gap:5px;color:#9eafa4;font-size:10px;padding:3px 3px 0;min-height:18px}.provider-note button{border:0;padding:0;background:none;color:var(--blue);font-size:10px}.provider-note svg{width:11px;height:11px}.panel-footer{border-top:1px solid #ffffff08;padding:7px 12px;color:#93a398;font-size:9px;display:flex;justify-content:space-between;gap:6px}.tabbar{display:flex;background:#121e1766;margin:9px 12px 0;padding:3px;border-radius:6px;gap:3px}.tabbar button{flex:1;border:0;border-radius:4px;background:none;color:#a5b3aa;font-size:11px;padding:5px 4px}.tabbar button[aria-selected=true]{background:#58634e55;color:#e8eddf}.empty{padding:18px;color:var(--muted);text-align:center}.tradeoff{margin:16px 12px 0;padding:12px 0;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}.tradeoff b{color:var(--ink);font-weight:550}.tradeoff p{margin:0 0 5px}.footnote{margin-top:30px;max-width:960px;color:#8c9c92;font-size:12px;line-height:1.6}.reset-demo{border:0;background:none;color:var(--blue);font-size:12px;padding:0;text-decoration:underline;text-underline-offset:3px}.context-menu{position:fixed;z-index:10;padding:4px;background:#303b34;border:1px solid #6d7a6d;border-radius:7px;box-shadow:0 8px 20px #0005}.context-menu[hidden]{display:none}.context-menu button{background:none;border:0;padding:6px 12px;text-align:left;border-radius:4px;font-size:12px}.context-menu button:hover{background:#80bcff22}dialog{max-width:390px;width:calc(100% - 32px);background:#243129;color:var(--ink);border:1px solid #667364;border-radius:12px;padding:22px;box-shadow:0 20px 80px #0008}dialog::backdrop{background:#060c09aa}dialog h2{font-size:18px;margin:0 0 14px}dialog p{font-size:13px;color:var(--muted);line-height:1.6;margin:8px 0}dialog strong{color:var(--ink)}dialog .close{margin-top:14px;width:100%;border:1px solid #65705d;background:#3a4938;border-radius:6px;padding:7px;font-size:12px}@media(max-width:650px){.shell{padding:24px 14px}.option{width:100%;--w:100%!important}.option-head{height:auto;margin-bottom:16px}.options{gap:28px}h1{font-size:25px}.a .row,.a .legend{grid-template-columns:136px minmax(0,1fr) 44px 42px;gap:3px}.b .row,.b .legend,.c .row,.c .legend{grid-template-columns:minmax(0,1fr) 86px 42px;gap:6px}.panel{width:100%}.recommended{font-size:9px}}
+</style>
+</head>
+<body>
+<main class="shell">
+  <div class="eyebrow">AI Usage / layout study</div>
+  <h1>Less width. Same useful information.</h1>
+  <p class="intro">The current 590px panel reserves space for a long label, a separate bar, a long value, and a reset sentence—even when some cells are empty. These alternatives <strong>remove repeated words or combine columns</strong>, rather than shrinking the text.</p>
+  <div class="recommendation"><strong>Updated A — more room for bars.</strong> <span>The panel stays 430px wide. The label column now fits the longest label instead of stretching, with tighter gaps on both sides. Bars take all remaining space: 173px at desktop size, over twice their original length. Full meanings stay available on hover or click; B and C remain alternative structures.</span></div>
+  <div class="toolbar">
+    <nav class="filters" aria-label="Compare layouts">
+      <button type="button" data-filter="all" aria-pressed="true">Compare all</button>
+      <button type="button" data-filter="a" aria-pressed="false">A · Table</button>
+      <button type="button" data-filter="b" aria-pressed="false">B · Meter</button>
+      <button type="button" data-filter="c" aria-pressed="false">C · Tabs</button>
+    </nav>
+    <span class="hint">Try the eye controls, tabs, row clicks, and right-click → hide.</span>
+  </div>
+  <section class="options" aria-label="Three dashboard structure options">
+    <article class="option a" data-option="a" style="--w:430px">
+      <header class="option-head">
+        <h2 class="option-title"><span class="letter">A</span> Compact table <span class="recommended">Updated</span></h2>
+        <p class="option-copy">Space reclaimed on both sides of the bars. Compact values: “N/A”, “1”, “62,500”. Same panel width and single-line rows.</p>
+        <div class="width-line"><b>430px</b><div class="width-track"><span style="width:72.88%"></span></div><span>27% narrower</span></div>
+      </header>
+      <div class="panel" id="panel-a" aria-label="Compact table preview"></div>
+      <div class="tradeoff"><p><b>Best for:</b> seeing all bars lined up in one glance.</p><p><b>Trade-off:</b> values and times are abbreviated. N/A means not reported, not zero; hover or click for full wording.</p></div>
+    </article>
+    <article class="option b" data-option="b" style="--w:390px">
+      <header class="option-head">
+        <h2 class="option-title"><span class="letter">B</span> Value + meter</h2>
+        <p class="option-copy">Put the tiny meter directly under its percentage, inside the same cell. No separate bar column.</p>
+        <div class="width-line"><b>390px</b><div class="width-track"><span style="width:66.10%"></span></div><span>34% narrower</span></div>
+      </header>
+      <div class="panel" id="panel-b" aria-label="Integrated meter preview"></div>
+      <div class="tradeoff"><p><b>Best for:</b> a compact menu-bar panel with all providers visible.</p><p><b>Trade-off:</b> meters are less prominent. Percentages become the primary readout.</p></div>
+    </article>
+    <article class="option c" data-option="c" style="--w:350px">
+      <header class="option-head">
+        <h2 class="option-title"><span class="letter">C</span> Window tabs</h2>
+        <p class="option-copy">Switch between 5-hour, weekly, and balances. The selected tab replaces repeated window labels.</p>
+        <div class="width-line"><b>350px</b><div class="width-track"><span style="width:59.32%"></span></div><span>41% narrower</span></div>
+      </header>
+      <div class="panel" id="panel-c" aria-label="Window tabs preview"></div>
+      <div class="tradeoff"><p><b>Best for:</b> checking one time window across all providers.</p><p><b>Trade-off:</b> not everything is visible at once; balances need a tab switch.</p></div>
+    </article>
+  </section>
+  <p class="footnote">These are interactive design mockups, not changes to the installed app. The illustrative snapshot is based on your screenshot; it does not refresh or connect to any account. “—” means a reset or expiry is unknown, never zero. Hidden-row changes are demo-only and shared across the three layouts. Panel widths are shown at 1× CSS scale on desktop; narrow screens adapt them. <button class="reset-demo" type="button" id="reset-demo">Reset demo</button></p>
+</main>
+<div class="context-menu" id="context-menu" role="menu" hidden><button type="button" role="menuitem" id="context-action"></button></div>
+<dialog id="details" aria-labelledby="detail-title"><h2 id="detail-title"></h2><div id="detail-body"></div><button class="close" type="button" id="close-details">Close</button></dialog>
+<script>
+'use strict';
+const svg = (body) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+const eye = svg('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>');
+const eyeOff = svg('<path d="m3 3 18 18M10.5 5.1 12 5c6.5 0 10 7 10 7a21 21 0 0 1-3 3.7M6.4 6.4A23 23 0 0 0 2 12s3.5 7 10 7a12 12 0 0 0 5.2-1.3"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>');
+const refresh = svg('<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 6a8 8 0 0 1 13 3M18 18a8 8 0 0 1-13-3"/>');
+const appMark = svg('<path d="M3 21h18M5 17V9h3v8M11 17V3h3v14M17 17v-6h3v6"/>');
+const info = svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/>');
+const esc = (value) => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const providers = [
+ {id:'claude',name:'Claude',plan:'Ultra',icon:'claude',rows:[
+  {id:'c5',window:'5h',label:'5-hour session',model:'All models',value:'95%',pct:95,time:'4m',fullTime:'Resets in 4 minutes',marker:2},
+  {id:'cw',window:'weekly',label:'Weekly · all',model:'All models',value:'98%',pct:98,time:'7d',fullTime:'Resets in 7 days',marker:97},
+  {id:'cf',window:'weekly',label:'Weekly · Fable',model:'Fable',value:'100%',pct:100,time:'7d',fullTime:'Resets in 7 days',marker:97},
+  {id:'cp',window:'balances',label:'API promo credits',value:'Not reported',time:'—',fullTime:'Expiry unknown',note:'Claude Platform API billing is not connected. This does not mean the promotional balance is zero.'},
+  {id:'cr',window:'balances',label:'Limit resets',value:'Not reported',time:'—',fullTime:'Expiry unknown',note:'One-time reset inventory was not reported. This is not a count of zero.'}
+ ]},
+ {id:'openai',name:'OpenAI',plan:'Codex Pro',icon:'openai',rows:[
+  {id:'ow',window:'weekly',label:'Weekly',model:'All models',value:'50%',pct:50,time:'4d',fullTime:'Resets in 4 days',marker:54},
+  {id:'oc',window:'balances',label:'Credits',value:'62,500',time:'—',fullTime:'Credit expiry unknown',note:'62,500 credits. These are credits, not dollars.'},
+  {id:'or',window:'balances',label:'Banked resets',value:'1 available',time:'7 Nov',fullTime:'Expires 7 November 2026',note:'One banked reset. This is a grant expiration, not a recurring quota reset.'}
+ ]},
+ {id:'kimi',name:'Kimi',plan:'Code',icon:'kimi',rows:[
+  {id:'k5',window:'5h',label:'5-hour',model:'All models',value:'100%',pct:100,time:'4h 34m',fullTime:'Resets in 4 hours, 34 minutes',marker:8},
+  {id:'kw',window:'weekly',label:'Weekly',model:'All models',value:'100%',pct:100,time:'7d',fullTime:'Resets in 7 days',marker:99}
+ ]},
+ {id:'zai',name:'Z.AI',plan:'Lite',icon:'zai',rows:[
+  {id:'z5',window:'5h',label:'5-hour',model:'All models',value:'100%',pct:100,time:'—',fullTime:'Reset unknown',marker:null},
+  {id:'zw',window:'weekly',label:'Weekly',model:'All models',value:'100%',pct:100,time:'5d',fullTime:'Resets in 5 days',marker:70}
+ ]},
+ {id:'antigravity',name:'Antigravity',plan:'Google',icon:'antigravity',rows:[
+  {id:'ag5',window:'5h',label:'5-hour · Gemini',model:'Gemini',value:'99.75%',pct:99.75,time:'1h 36m',fullTime:'Resets in 1 hour, 36 minutes',marker:32},
+  {id:'ac5',window:'5h',label:'5-hour · Claude + GPT',model:'Claude + GPT',value:'100%',pct:100,time:'4h 55m',fullTime:'Resets in 4 hours, 55 minutes',marker:2,hidden:true},
+  {id:'agw',window:'weekly',label:'Weekly · Gemini',model:'Gemini',value:'99.88%',pct:99.88,time:'5d',fullTime:'Resets in 5 days',marker:32},
+  {id:'acw',window:'weekly',label:'Weekly · Claude + GPT',model:'Claude + GPT',value:'100%',pct:100,time:'7d',fullTime:'Resets in 7 days',marker:1,hidden:true},
+  {id:'aaw',window:'weekly',label:'Weekly · Gemini 4 Argon',model:'Gemini 4 Argon',value:'87.39%',pct:87.39,time:'7d',fullTime:'Resets in 7 days',marker:1}
+ ]}
+];
+const layouts = ['a','b','c'];
+const revealState = {a:new Set(), b:new Set(), c:new Set()};
+let selectedTab = 'weekly';
+let contextTarget = null;
+function rowFor(id){for(const p of providers){const row=p.rows.find(r=>r.id===id);if(row)return {provider:p,row};}return null;}
+function track(row, mini=false){return `<span class="${mini?'mini-track':'bar'}" style="--pct:${row.pct}%;--marker:${row.marker??0}%" aria-hidden="true"><span class="fill" style="display:block"></span>${row.marker===null?'':'<span class="marker"></span>'}</span>`;}
+function wholePercent(row){return `${Math.round(row.pct)}%`;}
+function renderRow(row, layout){
+ const quota = row.pct !== undefined;
+ const label = layout==='c' && quota ? row.model : row.label;
+ const accessible = `${label}, ${quota?wholePercent(row)+' remaining':row.value}, ${row.fullTime}${row.hidden?', hidden item shown temporarily':''}`;
+ const labelHTML = `<span class="row-label">${row.hidden?`<span class="hidden-mark">${eyeOff}</span>`:''}${esc(label)}</span>`;
+ const displayValue = quota ? wholePercent(row) : layout==='a' ? (row.value==='Not reported'?'N/A':row.value.replace(/^([\d,]+) available$/, '$1')) : row.value;
+ const valueHTML = `<span class="value ${quota&&layout!=='a'?'meter':''}">${esc(displayValue)}${quota&&layout!=='a'?track(row,true):''}</span>`;
+ return `<button type="button" class="row ${quota?'quota':'benefit'} ${row.hidden?'is-hidden':''}" data-row="${row.id}" data-layout="${layout}" title="${esc(accessible)}" aria-label="${esc(accessible)}">${labelHTML}${quota&&layout==='a'?track(row):''}${valueHTML}<span class="time ${row.time==='—'?'unknown':''}">${esc(row.time)}</span></button>`;
+}
+function renderProvider(provider, layout){
+ const candidates = provider.rows.filter(r=>layout!=='c'||r.window===selectedTab);
+ if(!candidates.length)return '';
+ const hiddenCount = candidates.filter(r=>r.hidden).length;
+ const revealed = revealState[layout].has(provider.id);
+ const visible = candidates.filter(r=>!r.hidden||revealed);
+ const reveal = hiddenCount?`<button type="button" class="reveal" data-reveal="${provider.id}" data-layout="${layout}" aria-pressed="${revealed}" title="${revealed?'Conceal':'Temporarily reveal'} ${hiddenCount} hidden items" aria-label="${provider.name}: ${revealed?'conceal':'show'} ${hiddenCount} hidden items">${revealed?eye:eyeOff}<span>${hiddenCount}</span></button>`:'';
+ const iconClass = provider.id==='openai'||provider.id==='zai'?'mono':provider.id==='kimi'?'kimi':'';
+ const note = visible.some(r=>r.id==='cp')?`<div class="provider-note">${info}<span>API billing not connected.</span><button type="button" data-row="cp">Details</button></div>`:'';
+ return `<section class="provider" aria-label="${provider.name}"><header class="provider-head"><img class="provider-icon ${iconClass}" src="../../macos/Resources/ProviderIcons/${provider.icon}.svg" alt=""><span class="provider-name">${provider.name}</span><span class="plan">${provider.plan}</span><span class="spacer"></span><span class="provider-updated">Updated 2m ago</span>${reveal}</header>${visible.map(r=>renderRow(r,layout)).join('')}${visible.length?'':'<div class="provider-note">All items hidden · use the eye to reveal</div>'}${note}</section>`;
+}
+function render(){
+ for(const layout of layouts){
+  const tabbar = layout==='c'?`<div class="tabbar" role="tablist" aria-label="Quota window">${[['5h','5-hour'],['weekly','Weekly'],['balances','Balances']].map(([id,label])=>`<button type="button" role="tab" aria-selected="${selectedTab===id}" data-tab="${id}" id="tab-${id}" aria-controls="window-panel" tabindex="${selectedTab===id?'0':'-1'}">${label}</button>`).join('')}</div>`:'';
+  const legend = `<div class="legend"><span>${layout==='c'?(selectedTab==='balances'?'Balances':'Models'):'Allowance'}</span>${layout==='a'?'<span></span>':''}<span class="right">${layout==='a'?'Value':layout==='c'&&selectedTab==='balances'?'Available':'Left / balance'}</span><span class="right">${layout==='c'?(selectedTab==='balances'?'Expires':'Resets'):'Time'}</span></div>`;
+  const groups = providers.map(p=>renderProvider(p,layout)).join('');
+  document.getElementById(`panel-${layout}`).innerHTML = `<header class="panel-top"><span class="app-mark">${appMark}</span><strong>AI Usage</strong><span class="demo-tag">DEMO</span><span class="panel-tools"><span>Just updated</span>${refresh}</span></header>${tabbar}${legend}<div ${layout==='c'?`id="window-panel" role="tabpanel" aria-labelledby="tab-${selectedTab}"`:''}>${groups}</div><footer class="panel-footer"><span>Click a row for details</span><span>— = unknown</span></footer>`;
+ }
+}
+function showDetails(id){
+ const found=rowFor(id);if(!found)return;
+ const {provider,row}=found;
+ document.getElementById('detail-title').textContent = `${provider.name} · ${row.label}`;
+ document.getElementById('detail-body').innerHTML = `<p><strong>${esc(row.pct!==undefined?wholePercent(row):row.value)}${row.pct!==undefined?' remaining':''}</strong></p><p>${esc(row.fullTime)}</p>${row.note?`<p>${esc(row.note)}</p>`:''}${row.hidden?'<p>This item is hidden. It is visible only because temporary reveal is on. Right-click it and choose Unhide to keep it visible.</p>':''}<p>Design preview only. No account request or action is performed.</p>`;
+ document.getElementById('details').showModal();
+}
+function closeMenu(){document.getElementById('context-menu').hidden=true;contextTarget=null;}
+document.addEventListener('click', event=>{
+ const filter=event.target.closest('[data-filter]');
+ if(filter){document.querySelectorAll('[data-filter]').forEach(b=>b.setAttribute('aria-pressed',String(b===filter)));document.querySelectorAll('[data-option]').forEach(card=>card.hidden=filter.dataset.filter!=='all'&&card.dataset.option!==filter.dataset.filter);return;}
+ const reveal=event.target.closest('[data-reveal]');
+ if(reveal){const {layout}=reveal.dataset;const id=reveal.dataset.reveal;const set=revealState[layout];set.has(id)?set.delete(id):set.add(id);render();document.querySelector(`[data-layout="${layout}"][data-reveal="${id}"]`)?.focus();return;}
+ const tab=event.target.closest('[data-tab]');if(tab){selectedTab=tab.dataset.tab;render();document.querySelector(`[data-tab="${selectedTab}"]`)?.focus();return;}
+ if(event.target.closest('#context-action')){const found=rowFor(contextTarget);if(found){found.row.hidden=!found.row.hidden;for(const layout of layouts){if(!found.provider.rows.some(r=>r.hidden))revealState[layout].delete(found.provider.id);}render();}closeMenu();return;}
+ const row=event.target.closest('[data-row]');if(row){closeMenu();showDetails(row.dataset.row);return;}
+ if(!event.target.closest('#context-menu'))closeMenu();
+});
+document.addEventListener('contextmenu', event=>{
+ const element=event.target.closest('.row[data-row]');if(!element)return;event.preventDefault();contextTarget=element.dataset.row;
+ const row=rowFor(contextTarget).row;const menu=document.getElementById('context-menu');document.getElementById('context-action').textContent=row.hidden?'Unhide this item':'Hide this item';menu.hidden=false;menu.style.left=`${Math.min(event.clientX,innerWidth-menu.offsetWidth-8)}px`;menu.style.top=`${Math.min(event.clientY,innerHeight-menu.offsetHeight-8)}px`;document.getElementById('context-action').focus();
+});
+document.addEventListener('keydown',event=>{
+ if(event.key==='Escape')closeMenu();
+ const tab=event.target.closest('[data-tab]');
+ if(tab&&['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();const ids=['5h','weekly','balances'];let index=ids.indexOf(selectedTab);index=event.key==='Home'?0:event.key==='End'?2:(index+(event.key==='ArrowRight'?1:2))%3;selectedTab=ids[index];render();document.querySelector(`[data-tab="${selectedTab}"]`).focus();}
+});
+document.getElementById('close-details').addEventListener('click',()=>document.getElementById('details').close());
+document.getElementById('reset-demo').addEventListener('click',()=>{for(const p of providers)for(const r of p.rows)r.hidden=['ac5','acw'].includes(r.id);for(const layout of layouts)revealState[layout].clear();selectedTab='weekly';closeMenu();render();});
+render();
+</script>
+</body>
+</html>
