@@ -45,6 +45,18 @@ func TestAntigravityUsageReportPreservesMeasuredGroupsAndResets(t *testing.T) {
 	}
 }
 
+func TestAntigravityEpochResetKeepsMeasuredQuota(t *testing.T) {
+	now := time.Now()
+	data := strings.Replace(antigravityFixture(now), `"id":"claude-weekly"`, `"id":"claude-weekly","reset_time":"1970-01-01T00:00:00Z"`, 1)
+	quotas, err := parseAntigravityUsage([]byte(data), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(quotas) != 4 || quotas[0].ResetsAt == nil || quotas[2].ResetsAt != nil || quotas[2].Remaining != 100 {
+		t.Fatalf("unexpected quotas: %#v", quotas)
+	}
+}
+
 func TestAntigravityRejectsUnmeasuredAndMalformedReports(t *testing.T) {
 	now := time.Now()
 	good := antigravityFixture(now)
@@ -56,6 +68,7 @@ func TestAntigravityRejectsUnmeasuredAndMalformedReports(t *testing.T) {
 		"negative":             strings.Replace(good, `"remaining_fraction":0.86`, `"remaining_fraction":-0.1`, 1),
 		"fraction string":      strings.Replace(good, `"remaining_fraction":0.86`, `"remaining_fraction":"secret"`, 1),
 		"reset":                strings.Replace(good, now.Add(6*24*time.Hour).UTC().Format(time.RFC3339), "secret", 1),
+		"out-of-range reset":   strings.Replace(good, now.Add(6*24*time.Hour).UTC().Format(time.RFC3339), "1970-01-01T00:00:01Z", 1),
 		"duplicate":            strings.Replace(good, `"id":"gemini-5h"`, `"id":"gemini-weekly"`, 1),
 		"unsafe label":         strings.Replace(good, `"Gemini Models"`, `"Gemini\u001bModels"`, 1),
 		"missing percentages":  `{"status":"SUCCESS","command":{"name":"usage","data":{"groups":[{"name":"Gemini","buckets":[{"id":"a"}]}]}}}`,

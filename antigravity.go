@@ -156,7 +156,10 @@ func parseAntigravityUsage(data []byte, now time.Time) ([]antigravityCachedQuota
 				if err != nil {
 					return nil, errors.New("Antigravity reset timestamp was invalid")
 				}
-				q.ResetsAt = &reset
+				// agy can report the Unix epoch for a bucket with no known reset.
+				if !reset.Equal(time.Unix(0, 0)) {
+					q.ResetsAt = &reset
+				}
 			}
 			quotas = append(quotas, q)
 		}
