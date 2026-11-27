@@ -108,7 +108,7 @@ struct BenefitGroup: Decodable, Equatable {
             let value = benefitExpiry(nearest, now: now)
             let unknown = missingAmount > 0 || active.contains { $0.expiresAt == nil && $0.noExpiry != true }
             let prefix = unknown ? "Next known: " : entries.count > 1 ? "Next " : ""
-            let text = prefix.isEmpty ? value.text : prefix + value.text.prefix(1).lowercased() + value.text.dropFirst()
+            let text = prefix.isEmpty ? value.text : prefix + value.text.prefix(1).lowercased() + String(value.text.dropFirst())
             return BenefitExpiry(text: text, warning: value.warning)
         }
         if !active.isEmpty, active.allSatisfy({ $0.noExpiry == true }), missingAmount == 0 {
